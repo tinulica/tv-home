@@ -169,6 +169,17 @@ public class MainActivity extends Activity {
     private int wallpaperIndex = -1;
     private long wallpaperShownAt;
     private boolean resumed;
+    private ClaudeUsage claudeUsage;
+    private final Runnable usageTick = new Runnable() {
+        @Override
+        public void run() {
+            handler.removeCallbacks(this);
+            if (claudeUsage != null) {
+                claudeUsage.refresh();
+            }
+            handler.postDelayed(this, 60_000);
+        }
+    };
     /** The home screen while it is in front (hello brings it in when the TV comes on). */
     static volatile MainActivity current;
     private boolean arriving;
@@ -477,6 +488,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        usageTick.run();
         current = this;
         volumeSink = code -> handler.post(() -> onVolumeKey(code));
         keepSourcesServiceOn();
@@ -795,6 +807,11 @@ public class MainActivity extends Activity {
         alp.leftMargin = -px(32);
         pills.addView(avatar, alp);
         root.addView(pills, at(-2, -2, Gravity.TOP | Gravity.END, 0, px(26), side, 0));
+        // Top left: how much of Claude's plan is used (when Claude has written it).
+        claudeUsage = new ClaudeUsage(this, dp);
+        claudeUsage.setBackground(new GlassDrawable(px(18), dp, 0x24FFFFFF));
+        glass(claudeUsage, px(18), 0.8f);
+        root.addView(claudeUsage, at(-2, px(36), Gravity.TOP | Gravity.START, side, px(26), 0, 0));
 
         // "Up for full screen", shown above the tray while a pill is focused (tvOS 26 hint).
         hint = text(12, Typeface.create("sans-serif-medium", Typeface.NORMAL));

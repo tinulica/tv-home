@@ -63,6 +63,7 @@ final class LiquidDrop extends FrameLayout implements android.view.Choreographer
     private int screenW;
     private int screenH;
     private boolean leaving;
+    private float corner = Float.MAX_VALUE;
     private Runnable whenGone;
 
     /** `content` is laid out `w` x `h` inside the capsule. */
@@ -189,7 +190,7 @@ final class LiquidDrop extends FrameLayout implements android.view.Choreographer
         float top = cy - h / 2f;
         float bottom = cy + h / 2f;
         // The tip: a half ellipse while the drop is short (a bead), a round end once it is long.
-        float rx = Math.min(h / 2f, w);
+        float rx = Math.min(Math.min(h / 2f, w), corner);
         // The fillets reach along the edge in proportion to how much the drop bulges out.
         float f = Math.min(h * 0.3f, rx * 0.7f);
         shape.moveTo(0, top - f);
@@ -294,6 +295,11 @@ final class LiquidDrop extends FrameLayout implements android.view.Choreographer
         canvas.clipPath(shape);
         super.dispatchDraw(canvas);
         canvas.restoreToCount(saved);
+    }
+
+    /** A tall drop (a panel rather than a capsule): its corners no rounder than `r`. */
+    void setCorner(float r) {
+        corner = r;
     }
 
     /** The capsule's height once settled. */

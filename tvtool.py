@@ -1013,6 +1013,55 @@ def cmd_ask(args):
     sys.exit(0 if answer else 1)
 
 
+TASKS_FILE = Path(__file__).resolve().parent / "tv-data" / "tasks.json"
+
+
+def _push_json(device, name, data):
+    import tempfile
+    local = os.path.join(tempfile.gettempdir(), "tvhome-" + name)
+    with open(local, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    device.shell("mkdir -p %s" % MESSAGES)
+    device.push(local, "%s/%s" % (MESSAGES, name))
+    os.remove(local)
+
+
+def cmd_tasks(args):
+    """The to-do list shown under the weather when the TV comes on (Claude keeps it)."""
+    data = load_json(TASKS_FILE, {"tasks": []})
+    tasks = data.setdefault("tasks", [])
+    if args.clear:
+        tasks.clear()
+    for text in args.add or []:
+        tasks.append({"text": text, "done": False})
+    for n in args.done or []:
+        if 1 <= n <= len(tasks):
+            tasks[n - 1]["done"] = True
+    for n in sorted(args.remove or [], reverse=True):
+        if 1 <= n <= len(tasks):
+            tasks.pop(n - 1)
+    data["updated"] = int(time.time() * 1000)
+    save_json(TASKS_FILE, data)
+    for i, t in enumerate(tasks, 1):
+        say("%d. [%s] %s" % (i, "x" if t["done"] else " ", t["text"]))
+    device = open_device(args.ip, args.backend)
+    _push_json(device, "tasks.json", data)
+    if args.show:
+        device.shell("am broadcast -a ro.tinulica.tvhome.TEST_WEATHER")
+
+
+def cmd_usage(args):
+    """How much of Claude's plan is used, for the pill at the top left of the home screen."""
+    device = open_device(args.ip, args.backend)
+    if args.clear:
+        device.shell("rm -f %s/usage.json" % MESSAGES)
+        say("Ascuns.")
+        return
+    _push_json(device, "usage.json", {"percent": args.percent, "resets": args.resets or "",
+                                      "updated": int(time.time() * 1000)})
+    say("Trimis: %d%% folosit." % args.percent)
+
+
 def cmd_shot(args):
     device = open_device(args.ip, args.backend)
     screenshot(device, args.name)
@@ -1127,6 +1176,16 @@ def main(argv=None):
     p.add_argument("--details")
     p.add_argument("--from", dest="sender", default="Claude")
     p.add_argument("--timeout", type=int, default=600, help="câte secunde așteaptă (implicit 600)")
+    p = sub.add_parser("tasks", help="lista de lucruri de făcut, sub vreme când pornește televizorul")
+    p.add_argument("--add", action="append", help="adaugă un lucru (se poate repeta)")
+    p.add_argument("--done", action="append", type=int, help="bifează lucrul cu numărul N")
+    p.add_argument("--remove", action="append", type=int, help="scoate lucrul cu numărul N")
+    p.add_argument("--clear", action="store_true", help="golește lista")
+    p.add_argument("--show", action="store_true", help="arată acum vremea cu lista")
+    p = sub.add_parser("usage", help="cât e folosit din planul Claude (bara din stânga sus)")
+    p.add_argument("percent", type=int, nargs="?", default=0)
+    p.add_argument("--resets", help="când se reface, ex. „la 03:00”")
+    p.add_argument("--clear", action="store_true", help="ascunde bara")
     p = sub.add_parser("shot", help="captură de ecran")
     p.add_argument("name", nargs="?", default="ecran")
     p = sub.add_parser("restore", help="anulează toate schimbările")
@@ -1138,7 +1197,7 @@ def main(argv=None):
         "dock": cmd_dock, "shot": cmd_shot, "restore": cmd_restore,
         "update": cmd_update, "profile": cmd_profile, "folder": cmd_folder, "cameras": cmd_cameras,
         "icons": cmd_icons, "surse": cmd_surse, "notificari": cmd_notificari, "tmdb": cmd_tmdb,
-        "say": cmd_say, "ask": cmd_ask,
+        "say": cmd_say, "ask": cmd_ask, "tasks": cmd_tasks, "usage": cmd_usage,
         "sounds": lambda a: cmd_sounds_reset(open_device(a.ip, a.backend)) if a.reset else cmd_sounds(a),
     }
     commands[args.command](args)

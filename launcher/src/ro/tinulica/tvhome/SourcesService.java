@@ -474,12 +474,11 @@ public final class SourcesService extends AccessibilityService {
         layer.setClipChildren(false);
         final ClaudeCard card = new ClaudeCard(this, dp, from, title, text, details, options, qr, null,
                 (index, label) -> claudeAnswered(id, index, label));
-        android.util.DisplayMetrics m = getResources().getDisplayMetrics();
-        card.setBehind(behind, m.widthPixels, m.heightPixels);
-        int width = px(asking ? 520 : 470);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(width, -2, Gravity.TOP | Gravity.START);
-        lp.leftMargin = px(40);
-        lp.topMargin = px(62);
+        // Liquid Glass, as the other panes the service draws (lens over the screen behind).
+        glassOn(card, card.radius(), 0x1FFFFFFF, 0xA6141417);
+        int width = px(asking ? 440 : 400);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(width, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        lp.topMargin = px(40);   // room above for Clawd
         layer.addView(card, lp);
         try {
             windows.addView(layer, overlayParams(asking));
@@ -887,8 +886,30 @@ public final class SourcesService extends AccessibilityService {
         String detail = (n.city.isEmpty() ? "" : n.city + "  ·  ") + "max " + Math.round(n.high) + "°  min "
                 + Math.round(n.low) + "°";
         String big = Math.round(n.temp) + "°";
-        showDrop(new WeatherCard(this, dp, big, title, detail),
-                new WeatherCard.Scene(Weather.sky(n.code, n.day), n.day, 0, dp), false, 8000);
+        WeatherCard.Scene scene = new WeatherCard.Scene(Weather.sky(n.code, n.day), n.day, 0, dp);
+        List<TaskList.Task> tasks = TaskList.load(this);
+        if (tasks.isEmpty()) {
+            showDrop(new WeatherCard(this, dp, big, title, detail), scene, false, 8000);
+            return;
+        }
+        // The weather, and under it the day's tasks (Claude keeps them): a taller drop.
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.addView(new WeatherCard(this, dp, big, title, detail), new LinearLayout.LayoutParams(-1, px(54)));
+        View line = new View(this);
+        line.setBackgroundColor(0x33FFFFFF);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(-1, Math.max(1, px(0.6f)));
+        llp.leftMargin = px(18);
+        llp.rightMargin = px(16);
+        column.addView(line, llp);
+        TaskList list = new TaskList(this, dp, tasks);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(-1, -2);
+        tlp.leftMargin = px(18);
+        tlp.rightMargin = px(16);
+        tlp.topMargin = px(9);
+        column.addView(list, tlp);
+        int h = px(54 + 9 + 16 + 6 + 26 * tasks.size() + 12);
+        showDrop(column, scene, px(300), h, "notice.ogg", 12000 + 2500L * tasks.size(), false, px(24));
     }
 
     private void showAlert(Weather.Alert a) {
@@ -912,6 +933,11 @@ public final class SourcesService extends AccessibilityService {
      */
     private void showDrop(final View content, final LiquidDrop.Backdrop scene, final int w, final int h,
                           final String sound, final long showFor, final boolean anyway) {
+        showDrop(content, scene, w, h, sound, showFor, anyway, 0);
+    }
+
+    private void showDrop(final View content, final LiquidDrop.Backdrop scene, final int w, final int h,
+                          final String sound, final long showFor, final boolean anyway, final int corner) {
         if ((CinemaActivity.alive && !anyway) || windows == null) {
             return;
         }
@@ -938,6 +964,9 @@ public final class SourcesService extends AccessibilityService {
                 }
             }
             final LiquidDrop drop = new LiquidDrop(this, dp, content, w, h);
+            if (corner > 0) {
+                drop.setCorner(corner);
+            }
             if (scene != null) {
                 drop.setBackdrop(scene);
             }
