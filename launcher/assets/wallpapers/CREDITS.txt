@@ -1,0 +1,21 @@
+ciucas.jpg: "Alone in the unspoilt wilderness (Unsplash).jpg", Ciucaș Mountains, Romania.
+CC0 (public domain). https://commons.wikimedia.org/wiki/File:Alone_in_the_unspoilt_wilderness_(Unsplash).jpg
+
+nature-01.jpg to nature-12.jpg come from github.com/mihirgupta0900/tv-home (selected from
+Wikimedia Commons Featured Pictures). Each photo keeps its own licence and author:
+
+
+- `nature-01.jpg` 1 lake louise pano 2019: Chensiyuan, CC BY-SA 4.0. https://commons.wikimedia.org/wiki/File%3A1_lake_louise_pano_2019.jpg
+- `nature-02.jpg` Cirrus front over Austnesfjorden, Austvågøya, Lofoten, Norway, 2015 April: Ximonic (Simo Räsänen), CC BY-SA 3.0. https://commons.wikimedia.org/wiki/File%3ACirrus_front_over_Austnesfjorden%2C_Austv%C3%A5g%C3%B8ya%2C_Lofoten%2C_Norway%2C_2015_April.jpg
+- `nature-03.jpg` Área de Proteção Ambiental da Baleia Franca Claudio Seelig (01): Ctseelig, CC BY-SA 4.0. https://commons.wikimedia.org/wiki/File%3A%C3%81rea_de_Prote%C3%A7%C3%A3o_Ambiental_da_Baleia_Franca_Claudio_Seelig_%2801%29.jpg
+- `nature-04.jpg` Aurora amazônica no Lago do Cuniã: RodrigoErse, CC BY-SA 4.0. https://commons.wikimedia.org/wiki/File%3AAurora_amaz%C3%B4nica_no_Lago_do_Cuni%C3%A3.jpg
+- `nature-05.jpg` 2015 Spullersee im Lechquellengebirge: Feel free to use my photos, but please m, CC BY-SA 3.0 at. https://commons.wikimedia.org/wiki/File%3A2015_Spullersee_im_Lechquellengebirge.jpg
+- `nature-06.jpg` 2014 Paczków, staw: Jacek Halicki, CC BY-SA 3.0. https://commons.wikimedia.org/wiki/File%3A2014_Paczk%C3%B3w%2C_staw.jpg
+- `nature-07.jpg` Aerial image of Stromboli (view from the northeast): Carsten Steger, CC BY-SA 4.0. https://commons.wikimedia.org/wiki/File%3AAerial_image_of_Stromboli_%28view_from_the_northeast%29.jpg
+- `nature-08.jpg` Flatirons Sunrise: Tyler Cipriani, CC BY-SA 4.0. https://commons.wikimedia.org/wiki/File%3AFlatirons_Sunrise.jpg
+- `nature-09.jpg` Manneporte en soir: Jörg Braukmann, CC BY-SA 4.0. https://commons.wikimedia.org/wiki/File%3AManneporte_en_soir.jpg
+- `nature-10.jpg` 2016-11-13 01 Kjeungskjær Lighthouse, Sør-Trøndelag, Norway: Gordon Leggett, CC BY-SA 4.0. https://commons.wikimedia.org/wiki/File%3A2016-11-13_01_Kjeungskj%C3%A6r_Lighthouse%2C_S%C3%B8r-Tr%C3%B8ndelag%2C_Norway.jpg
+- `nature-11.jpg` Eilean Donan Castle, Scotland - Jan 2011: Diliff, CC BY-SA 3.0. https://commons.wikimedia.org/wiki/File%3AEilean_Donan_Castle%2C_Scotland_-_Jan_2011.jpg
+- `nature-12.jpg` Breathtaking beauty of Dzukou Valley in Manipur-Nagaland border (edit): Original:  Samudra Bikash Hazarika
+
+Deri, CC BY-SA 4.0. https://commons.wikimedia.org/wiki/File%3ABreathtaking_beauty_of_Dzukou_Valley_in_Manipur-Nagaland_border_%28edit%29.jpg

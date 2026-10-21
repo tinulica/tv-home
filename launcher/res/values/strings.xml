@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sources_service">TV Home: panoul Surse în locul celui TCL și cardul care apare când pornește un dispozitiv pe HDMI (de ex. PlayStation). Ține apăsat Back pentru aplicațiile deschise. Imaginea din spatele panourilor e folosită doar pentru efectul de sticlă, nu este salvată. Când închizi o aplicație din comutator, apasă singur „Opriți forțat” în Setări pentru acea aplicație; altceva nu citește și nu apasă.</string>
+    <string name="sources_service_label">TV Home Surse</string>
+</resources>

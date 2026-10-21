@@ -1,0 +1,13 @@
+ciucas.jpg=Munții Ciucaș
+nature-01.jpg=Lake Louise
+nature-02.jpg=Lofoten
+nature-03.jpg=Baleia Franca
+nature-04.jpg=Lago do Cuniã
+nature-05.jpg=Spullersee
+nature-06.jpg=Paczków
+nature-07.jpg=Stromboli
+nature-08.jpg=Flatirons
+nature-09.jpg=Manneporte
+nature-10.jpg=Kjeungskjær
+nature-11.jpg=Eilean Donan
+nature-12.jpg=Dzukou Valley

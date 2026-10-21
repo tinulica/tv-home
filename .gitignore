@@ -1,0 +1,10 @@
+# Everything about one particular TV stays on your computer: backups, screenshots,
+# the TMDB key, recordings.
+tv-data/
+launcher/build/
+__pycache__/
+.pytest_cache/
+*.keystore
+*.jks
+*.mp4
+*.mov
