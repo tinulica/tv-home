@@ -948,15 +948,65 @@ def _b64(text):
     return base64.b64encode((text or "").encode("utf-8")).decode("ascii")
 
 
+def _account(device=None):
+    """This computer's Claude account on the TV: made (and named after the user) on first use."""
+    state = load_json(STATE_FILE, {})
+    acc = state.get("claude_account")
+    if not acc:
+        import getpass
+        import secrets
+        name = os.environ.get("USERNAME") or os.environ.get("USER") or getpass.getuser() or "Claude"
+        acc = {"id": secrets.token_hex(4), "name": name[:1].upper() + name[1:], "detail": "Claude Code"}
+        state["claude_account"] = acc
+        save_json(STATE_FILE, state)
+        if device is not None:
+            _register(device, acc)
+    return acc
+
+
+def _register(device, acc, remove=False):
+    """Adds (or takes out) this computer's account in the TV's list, keeping the others."""
+    raw = device.shell("cat %s/accounts.json 2>/dev/null" % MESSAGES)
+    try:
+        data = json.loads(raw) if raw.strip().startswith("{") else {}
+    except ValueError:
+        data = {}
+    accounts = [a for a in data.get("accounts", []) if a.get("id") != acc["id"]]
+    if not remove:
+        accounts.append(acc)
+    _push_json(device, "accounts.json", {"accounts": accounts})
+    return accounts
+
+
+def cmd_claude(args):
+    """Names this computer's Claude account on the TV; each profile chooses one in Control Center."""
+    device = open_device(args.ip, args.backend)
+    acc = _account()
+    if args.name:
+        acc["name"] = args.name
+    if args.detail is not None:
+        acc["detail"] = args.detail
+    state = load_json(STATE_FILE, {})
+    state["claude_account"] = acc
+    save_json(STATE_FILE, state)
+    accounts = _register(device, acc, remove=args.remove)
+    for a in accounts:
+        say("%s %s  (%s)" % ("*" if a["id"] == acc["id"] else " ", a.get("name", ""), a.get("detail", "")))
+    say("Pe televizor: Control Center > cercul Claude > alegeți contul pentru profilul în uz.")
+
+
 def _message(device, extras):
     """Sends MessageReceiver a message; every text extra base64-encoded so anything survives the shell."""
     parts = ["am broadcast -n %s/.MessageReceiver --ez b64 true" % HOME_PKG]
+    extras = dict(extras)
+    if "dismiss" not in extras:
+        extras["account"] = _account(device)["id"]
     for key, value in extras.items():
         if value is None:
             continue
         if isinstance(value, int):
             parts.append("--ei %s %d" % (key, value))
-        elif key in ("id", "qr", "style", "dismiss"):
+        elif key in ("id", "qr", "style", "dismiss", "account"):
             parts.append("--es %s %s" % (key, value))
         else:
             parts.append("--es %s %s" % (key, _b64(value)))
@@ -964,9 +1014,10 @@ def _message(device, extras):
 
 
 def cmd_say(args):
-    """A message on the TV: a card (with --details it opens up to show them)."""
+    """A message on the TV: Claude's card (with --details it opens up to show them); --drop for a plain drop."""
     device = open_device(args.ip, args.backend)
-    _message(device, {"style": "claude" if args.details or args.card else None, "from": args.sender,
+    card = not args.drop and (args.sender == "Claude" or args.details or args.card)
+    _message(device, {"style": "claude" if card else None, "from": args.sender, "mood": args.mood,
                       "title": args.title, "text": args.text, "details": args.details})
     say("Trimis.")
 
@@ -993,6 +1044,7 @@ def cmd_ask(args):
         say("(Fără cod QR: python -m pip install segno)")
     _message(device, {"style": "claude", "id": token, "from": args.sender, "title": args.question,
                       "text": args.text, "details": args.details, "options": "|".join(options), "qr": qr_name,
+                      "mood": args.mood,
                       "timeout": args.timeout})
     answer_file = "%s/answer-%s.txt" % (MESSAGES, token)
     deadline = time.time() + args.timeout
@@ -1045,7 +1097,7 @@ def cmd_tasks(args):
     for i, t in enumerate(tasks, 1):
         say("%d. [%s] %s" % (i, "x" if t["done"] else " ", t["text"]))
     device = open_device(args.ip, args.backend)
-    _push_json(device, "tasks.json", data)
+    _push_json(device, "tasks-%s.json" % _account(device)["id"], data)
     if args.show:
         device.shell("am broadcast -a ro.tinulica.tvhome.TEST_WEATHER")
 
@@ -1053,12 +1105,13 @@ def cmd_tasks(args):
 def cmd_usage(args):
     """How much of Claude's plan is used, for the pill at the top left of the home screen."""
     device = open_device(args.ip, args.backend)
+    name = "usage-%s.json" % _account(device)["id"]
     if args.clear:
-        device.shell("rm -f %s/usage.json" % MESSAGES)
+        device.shell("rm -f %s/%s" % (MESSAGES, name))
         say("Ascuns.")
         return
-    _push_json(device, "usage.json", {"percent": args.percent, "resets": args.resets or "",
-                                      "updated": int(time.time() * 1000)})
+    _push_json(device, name, {"percent": args.percent, "resets": args.resets or "",
+                              "updated": int(time.time() * 1000)})
     say("Trimis: %d%% folosit." % args.percent)
 
 
@@ -1163,12 +1216,15 @@ def main(argv=None):
     p.add_argument("--off", action="store_true", help="retrage accesul la notificări")
     p = sub.add_parser("tmdb", help="cheia TMDB pentru Cinema (filme și unde le găsiți în România)")
     p.add_argument("--new", action="store_true", help="introduceți altă cheie")
-    p = sub.add_parser("say", help="un mesaj pe televizor (o notificare; --details îl face card care se extinde)")
+    p = sub.add_parser("say", help="un mesaj pe televizor (cardul Claude; --details se extinde)")
     p.add_argument("title")
     p.add_argument("text", nargs="?")
     p.add_argument("--details", help="mai multe rânduri; '- ' = listă, **text** = îngroșat")
     p.add_argument("--from", dest="sender", default="Claude", help="de la cine (implicit: Claude)")
-    p.add_argument("--card", action="store_true", help="cardul mare chiar și fără detalii")
+    p.add_argument("--card", action="store_true", help="cardul Claude chiar dacă e de la altcineva")
+    p.add_argument("--drop", action="store_true", help="o picătură simplă în loc de cardul Claude")
+    p.add_argument("--mood", choices=["hello", "done", "party", "question", "attention", "working", "love", "sleep"],
+                   help="ce face Clawd (altfel îl aleg cuvintele mesajului)")
     p = sub.add_parser("ask", help="o întrebare pe televizor; răspunsul (telecomanda sau telefonul) e afișat aici")
     p.add_argument("question")
     p.add_argument("text", nargs="?")
@@ -1176,6 +1232,11 @@ def main(argv=None):
     p.add_argument("--details")
     p.add_argument("--from", dest="sender", default="Claude")
     p.add_argument("--timeout", type=int, default=600, help="câte secunde așteaptă (implicit 600)")
+    p.add_argument("--mood", choices=["hello", "done", "party", "question", "attention", "working", "love", "sleep"], help="ce face Clawd")
+    p = sub.add_parser("claude", help="contul Claude al acestui calculator pe televizor (profilele îl aleg)")
+    p.add_argument("--name", help="numele afișat, ex. „Ana”")
+    p.add_argument("--detail", help="sub nume, ex. „Claude Code · birou”")
+    p.add_argument("--remove", action="store_true", help="scoate contul de pe televizor")
     p = sub.add_parser("tasks", help="lista de lucruri de făcut, sub vreme când pornește televizorul")
     p.add_argument("--add", action="append", help="adaugă un lucru (se poate repeta)")
     p.add_argument("--done", action="append", type=int, help="bifează lucrul cu numărul N")
@@ -1197,7 +1258,7 @@ def main(argv=None):
         "dock": cmd_dock, "shot": cmd_shot, "restore": cmd_restore,
         "update": cmd_update, "profile": cmd_profile, "folder": cmd_folder, "cameras": cmd_cameras,
         "icons": cmd_icons, "surse": cmd_surse, "notificari": cmd_notificari, "tmdb": cmd_tmdb,
-        "say": cmd_say, "ask": cmd_ask, "tasks": cmd_tasks, "usage": cmd_usage,
+        "say": cmd_say, "ask": cmd_ask, "tasks": cmd_tasks, "usage": cmd_usage, "claude": cmd_claude,
         "sounds": lambda a: cmd_sounds_reset(open_device(a.ip, a.backend)) if a.reset else cmd_sounds(a),
     }
     commands[args.command](args)

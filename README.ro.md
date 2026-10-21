@@ -2,8 +2,9 @@
 
 **Un ecran principal în stilul Apple TV pentru televizoarele TCL cu Google TV**: Liquid Glass,
 animații fluide, previzualizări din aplicațiile tale, Control Center, căutare în aplicațiile de
-streaming, un Mod Cinema care te ajută să alegi un film, notificări cu vremea și alertele meteo, plus
-un instrument care curăță televizorul.
+streaming, un Mod Cinema care te ajută să alegi un film, notificări cu vremea și alertele meteo,
+mesaje și întrebări de pe calculator (făcute pentru un asistent AI care lucrează cât te uiți la
+televizor), plus un instrument care curăță televizorul.
 
 [English](README.md)
 
@@ -13,6 +14,9 @@ un instrument care curăță televizorul.
 > Android TV 12 (4K, Europa). Se bazează pe felul în care se comportă sistemul TCL (paginile de setări,
 > sursele, managerul de energie), așa că pe alte mărci unele părți nu vor merge. E un proiect personal,
 > fără legătură cu Apple, TCL sau Google.
+>
+> **Open source și încă neșlefuit pe alocuri.** Are buguri; se pot rezolva. Issue-urile și pull
+> request-urile sunt binevenite.
 
 ---
 
@@ -87,13 +91,57 @@ ecranului, peste orice te uiți (în afară de Mod Cinema), cu un „clink” di
   prognoza spune că se schimbă cerul, altfel la fiecare jumătate de oră.
 - **Alerte**: codurile galben, portocaliu și roșu pentru județul tău (România, de la MeteoAlarm).
 - **Notificările aplicațiilor** (opțional, vezi [Instalare](#7-extra-opțional)).
-- **Mesaje de pe calculator**: un script poate afișa un mesaj pe televizor:
+- **Mesaje de pe calculator**: vezi [mai jos](#mesaje-și-întrebări-de-pe-calculator).
 
-  ```bash
-  adb shell am broadcast -n ro.tinulica.tvhome/.MessageReceiver --es title "Backup gata" --es text "Totul e în regulă"
-  ```
+Mai multe deodată se așază una sub alta și își fac loc fluid când vin și pleacă; când n-ar mai
+încăpea pe ecran, pleacă cea mai veche. Pe ecranul principal, **Stânga** la marginea din stânga
+intră cu telecomanda în ele: **Sus / Jos** treci de la una la alta (cea pe care ești vine în față și
+se deschide cu tot textul), **Back** o închide, **Dreapta** ieși. Cât ești în ele, niciuna nu pleacă
+singură.
 
 ![Notificări](docs/images/notifications.jpg)
+
+### Mesaje și întrebări de pe calculator
+
+Făcute pentru un asistent AI (Claude) care lucrează pe calculator cât tu te uiți la televizor, ca
+să-l urmărești și să-i răspunzi de pe canapea; orice script le poate folosi.
+
+- **Mesajele** ies din marginea din stânga ca o picătură mică de Liquid Glass, cu semnul Claude și
+  titlul, care apoi se deschide, în lățime și în jos, cu textul și detaliile (rândurile care încep cu
+  `- ` sunt o listă, `**cuvinte**` sunt îngroșate).
+- **Clawd**, mascota în pixeli a Claude Code, aterizează pe marginea de sus și face altceva la fiecare
+  mesaj: face cu mâna, sare cu ochii fericiți când ceva e gata, aruncă confetti, se plimbă sub un
+  semn de întrebare cât așteaptă o întrebare, ține mâinile sus când are nevoie de tine, lucrează sub
+  semnul Claude care se rotește, trimite o inimă sau doarme. E ales după cuvinte (sau cu `--mood`)
+  și nu e același de două ori la rând.
+- **Întrebările** au răspunsurile ca butoane de sticlă: alegi unul cu telecomanda sau scanezi codul
+  QR și răspunzi de pe telefon (cât așteaptă întrebarea, televizorul servește o pagină mică în rețeaua
+  de acasă). Calculatorul primește răspunsul.
+- **Sarcini**: o listă scurtă sub vreme când pornește televizorul (întâi vremea, apoi se deschide în
+  jos spre listă), cu bife din Liquid Glass care se umplu pe măsură ce lucrurile sunt gata.
+- **Consum**: o pastilă mică de sticlă în stânga sus pe ecranul principal, cu cât e folosit din plan și
+  când se reface. Apare doar pe ecranul principal și urcă din drum cât sunt notificări.
+- **Un cont pe profil**: fiecare calculator care vorbește cu televizorul e un cont. În Control Center,
+  cercul Claude alege ce cont vede profilul în uz, sau niciunul. Celelalte profiluri nu văd nimic;
+  mesajele lor așteaptă până e în uz un profil legat de ele.
+
+```bash
+python tvtool.py claude --name "Ana"                       # numele contului acestui calculator
+python tvtool.py say "Backup gata" "Totul e bine" --details $'- 120 GB copiați\n- **fără erori**'
+python tvtool.py ask "Public acum?" --options "Da|Încă nu"  # afișează răspunsul
+python tvtool.py tasks --add "Reînnoiesc domeniul" --done 1 # lista de sub vreme
+python tvtool.py usage 18 --resets "se reface la 02:20"     # pastila din stânga sus
+```
+
+Merge și un broadcast simplu, din orice script:
+
+```bash
+adb shell am broadcast -n ro.tinulica.tvhome/.MessageReceiver --es title "Backup gata" --es text "Totul e în regulă"
+```
+
+![Un mesaj de la Claude](docs/images/claude-message.jpg)
+
+![Iese mic, apoi se deschide](docs/images/claude-opening.jpg)
 
 ### Căutare
 
@@ -252,6 +300,18 @@ python tvtool.py shot acasa                                            # o captu
 
 `python tvtool.py -h` arată toate comenzile, iar `python tvtool.py <comandă> -h` opțiunile fiecăreia.
 
+### 10. Mesaje de pe calculator (opțional)
+
+```bash
+python tvtool.py claude --name "Ana"            # calculatorul devine un cont pe televizor
+python tvtool.py say "Salut de pe calculator"   # un prim mesaj
+```
+
+Primul profil vede primul cont până alege; orice profil își alege contul în Control Center (cercul
+Claude). Ca să-l folosească un asistent AI, spune-i să ruleze `tvtool say` când termină ceva sau are
+nevoie de tine și `tvtool ask` când are nevoie de un răspuns (comanda așteaptă și afișează
+răspunsul). Codurile QR au nevoie de `segno` (e în `requirements.txt`).
+
 ---
 
 ## Cum îl folosești cu telecomanda
@@ -264,6 +324,9 @@ python tvtool.py shot acasa                                            # o captu
 | Pe o aplicație | OK ținut apăsat | O muți cu Stânga / Dreapta; OK sau Back o lasă acolo |
 | Oriunde | Back ținut apăsat | Aplicațiile recente (dai drumul când s-a umplut cercul); Sus pe una o închide |
 | Oriunde | Volum | Bara de volum din sticlă |
+| Acasă, cu notificări | Stânga la marginea din stânga | În notificări: Sus / Jos între ele, Back închide una, Dreapta ieși |
+| O întrebare de pe calculator | Sus / Jos, OK | Alegi un răspuns; Back o închide fără răspuns |
+| Control Center | OK pe cercul Claude | Mesajele cărui calculator le vede profilul |
 | Control Center | OK ținut pe o scurtătură | O muți sau o scoți; **+** adaugă una |
 | Control Center | OK / OK ținut pe un profil | Treci pe el / îl editezi |
 | Căutare | Litere, OK, Jos | Scrii; rezultatele; *Vezi pe …* și *Trailer* |
@@ -311,6 +374,8 @@ TV Home nu are cont, statistici sau server propriu. Se conectează la:
 | YouTube / Vimeo | Trailere | ID-ul trailerului |
 
 Restul (profilurile, bara, alegerile tale) rămâne pe televizor. `tvtool` comunică doar cu televizorul tău.
+Cât așteaptă o întrebare de pe calculator, televizorul răspunde pe portul 8642 în rețeaua de acasă
+(pagina pe care o deschide codul QR); se închide odată cu întrebarea.
 
 ---
 
@@ -341,6 +406,10 @@ Restul (profilurile, bara, alegerile tale) rămâne pe televizor. `tvtool` comun
 - **Căutarea sau Mod Cinema cer o cheie**: `python tvtool.py tmdb`.
 - **Ceva nu arată bine după o actualizare**: `python tvtool.py restore`, apoi din nou `launcher`.
 
+- **Un mesaj de pe calculator nu apare**: profilul în uz nu e legat de contul acelui calculator
+  (Control Center, cercul Claude); apare când e în uz un profil legat. Cât serviciul e oprit (vezi
+  primul punct) vine ca un mesaj simplu de sistem.
+- **Telefonul nu deschide pagina întrebării**: telefonul trebuie să fie în aceeași rețea cu televizorul.
 ---
 
 ## Compilare
@@ -374,7 +443,9 @@ tvtool.py          instrumentul din linia de comandă: conectare, backup, cură�
 catalog.py         pachetele cunoscute de la TCL / Google TV și ce face fiecare
 launcher/          TV Home, aplicația Android
   src/             sursele Java: MainActivity (ecranul principal), SourcesService (serviciul de
-                   accesibilitate: notificări, Back ținut, volum), CinemaActivity, LiquidDrop, ...
+                   accesibilitate: notificări, Back ținut, volum), CinemaActivity, LiquidDrop,
+                   ClaudeCard, Clawd, ClaudeLink (conturi pe profil), QuestionServer (răspunsuri de
+                   pe telefon), ...
   assets/          fundaluri, sunete, avatare, imaginile din Mod Cinema
   build.sh         scriptul de compilare
 dist/tv-home.apk   aplicația compilată
@@ -398,6 +469,10 @@ docs/              imaginile de aici și note despre cum e desenat Liquid Glass
   is not endorsed or certified by TMDB.*
 - **Vremea**: [Open-Meteo](https://open-meteo.com) (CC BY 4.0). **Alerte**: MeteoAlarm / EUMETNET.
 - **Sunete**: făcute pentru acest proiect de scripturile din `tools/`.
+- **Clawd**: desenat după grila de 12 × 8 pixeli pe care [ClawdMoji](https://github.com/afspies/ClawdMoji)
+  (MIT) a scos-o din logo-ul Claude Code; pozele sunt ale acestui proiect. **Semnul Claude**: simbolul
+  de pe Wikimedia Commons.
 
-Apple TV, tvOS și Liquid Glass sunt mărci Apple Inc.; TCL, Google TV, Netflix și celelalte nume de
-aplicații aparțin proprietarilor lor. Proiectul nu are legătură cu niciuna dintre ele.
+Apple TV, tvOS și Liquid Glass sunt mărci Apple Inc.; Claude, logo-ul Claude și Clawd sunt mărci
+Anthropic; TCL, Google TV, Netflix și celelalte nume de aplicații aparțin proprietarilor lor. Proiectul
+nu are legătură cu niciuna dintre ele și nu e susținut de ele.

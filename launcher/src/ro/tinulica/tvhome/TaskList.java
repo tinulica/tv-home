@@ -22,7 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The to-do list Claude keeps for the TV (files/claude/tasks.json, written by `tvtool tasks`),
+ * The to-do list Claude keeps for the TV (files/claude/tasks-ACCOUNT.json, written by `tvtool tasks`),
  * shown under the weather when the TV comes on: one row per task, a check of Liquid Glass
  * in front of each. A finished task's check fills green from the middle and its tick draws
  * itself in, one after another, as Control Center's switches do; an open one is a ring of glass.
@@ -34,11 +34,10 @@ final class TaskList extends LinearLayout {
         boolean done;
     }
 
-    /** The tasks, or an empty list (no file, or older than two days). */
+    /** The linked account's tasks, or an empty list (none linked, no file, or older than two days). */
     static List<Task> load(Context context) {
         List<Task> out = new ArrayList<>();
-        File dir = context.getExternalFilesDir("claude");
-        File f = dir == null ? null : new File(dir, "tasks.json");
+        File f = ClaudeLink.file(context, "tasks");
         if (f == null || !f.exists() || System.currentTimeMillis() - f.lastModified() > 2 * 24 * 3600_000L) {
             return out;
         }
@@ -76,7 +75,7 @@ final class TaskList extends LinearLayout {
             LinearLayout row = new LinearLayout(context);
             row.setOrientation(HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.addView(new Check(context, dp, t.done, 0.5f + 0.18f * i),
+            row.addView(new Check(context, dp, t.done, 1.3f + 0.18f * i),   // once the drop has opened
                     new LayoutParams(Math.round(18 * dp), Math.round(18 * dp)));
             TextView label = text(context, dp, 12.5f, false);
             label.setText(t.text);
@@ -87,7 +86,9 @@ final class TaskList extends LinearLayout {
             LayoutParams llp = new LayoutParams(0, -2, 1f);
             llp.leftMargin = Math.round(9 * dp);
             row.addView(label, llp);
-            LayoutParams rlp = new LayoutParams(-1, Math.round(24 * dp));
+            // As tall as its words (one line, or all of them when the notice is opened).
+            row.setMinimumHeight(Math.round(24 * dp));
+            LayoutParams rlp = new LayoutParams(-1, -2);
             rlp.topMargin = Math.round((i == 0 ? 6 : 2) * dp);
             addView(row, rlp);
         }

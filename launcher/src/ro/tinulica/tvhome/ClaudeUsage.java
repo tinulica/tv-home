@@ -21,8 +21,9 @@ import java.io.File;
 
 /**
  * At the top left of the home screen, on glass: Claude's mark and how much of Claude's plan is
- * used, as a bar and a number, with when it resets. Claude writes files/claude/usage.json when it
- * checks (`tvtool usage`); the pill hides when there is nothing recent.
+ * used, as a bar and a number, with when it resets. Claude writes files/claude/usage-ACCOUNT.json
+ * when it checks (`tvtool usage`); the pill shows the account the profile is linked to, and hides
+ * when there is nothing recent.
  */
 final class ClaudeUsage extends LinearLayout {
 
@@ -44,6 +45,7 @@ final class ClaudeUsage extends LinearLayout {
         label.setTextSize(10.5f);
         label.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         label.setIncludeFontPadding(false);
+        label.setSingleLine(true);   // one line, the whole of it (it was cut to the bar's width)
         label.setShadowLayer(px(3), 0, px(1), 0x66000000);
         words.addView(label);
         bar = new Bar(context);
@@ -56,10 +58,9 @@ final class ClaudeUsage extends LinearLayout {
         setVisibility(GONE);
     }
 
-    /** Reads usage.json again; true when there is something to show. */
+    /** Reads the linked account's usage again; true when there is something to show. */
     boolean refresh() {
-        File dir = getContext().getExternalFilesDir("claude");
-        File f = dir == null ? null : new File(dir, "usage.json");
+        File f = ClaudeLink.file(getContext(), "usage");
         if (f == null || !f.exists() || System.currentTimeMillis() - f.lastModified() > 12 * 3600_000L) {
             setVisibility(GONE);
             return false;

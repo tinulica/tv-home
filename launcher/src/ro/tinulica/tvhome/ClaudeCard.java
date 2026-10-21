@@ -7,8 +7,6 @@ import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.graphics.RectF;
-import android.graphics.SweepGradient;
 import android.graphics.Typeface;
 import android.os.SystemClock;
 import android.text.SpannableStringBuilder;
@@ -16,7 +14,6 @@ import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.style.LeadingMarginSpan;
 import android.text.style.StyleSpan;
-import android.view.Choreographer;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -29,22 +26,26 @@ import android.widget.TextView;
 import java.util.List;
 
 /**
- * A message from Claude on the TV: a compact pane of Liquid Glass at the top of the screen (its
- * background is the service's lens glass), with a thin edge of Claude's warm colours going round,
- * Claude's mark by the name, and Claude Code's mascot, Clawd, standing on the top edge: it bobs
- * and blinks, walks to and fro while a question waits, and jumps when it is answered.
+ * A message from Claude on the TV: what is inside the drop of Liquid Glass that flows out of the
+ * left edge (SourcesService puts it in a LiquidDrop, with Clawd standing on top): Claude's mark
+ * by the name, the title and the text.
  *
- * With details it opens up after a moment ("- " lines are bullets, **words** bold); a question
- * shows its choices as glass capsules (the remote picks one) and a QR code to answer by phone.
+ * It comes out small, the name and the title only, and once the drop has settled it opens,
+ * wider and down: the text, then the details ("- " lines are bullets, **words** bold), then a
+ * question's choices as glass capsules (the remote picks one) with a QR code to answer by phone.
  */
-final class ClaudeCard extends FrameLayout implements Choreographer.FrameCallback {
+final class ClaudeCard extends FrameLayout {
 
     interface Choice {
         void chosen(int index, String label);
     }
 
+    /** How much wider and taller than its first size the card has grown (opening). */
+    interface Growth {
+        void grew(float wider, float taller);
+    }
+
     static final int CORAL = 0xFFD97757;
-    private static final int[] EDGE = {0xFFD97757, 0xFFF0A58A, 0xFFFBE3D5, 0xFFE8916F, 0xFFC15F3C, 0xFFD97757};
     /** Claude's mark (Wikimedia Commons, "Claude AI symbol.svg", CC0), in a 100 x 100 box. */
     static final String MARK_PATH = "m19.6 66.5 19.7-11 .3-1-.3-.5h-1l-3.3-.2-11.2-.3L14 53l-9.5-.5-2.4-.5L0 49l.2-1.5 "
             + "2-1.3 2.9.2 6.3.5 9.5.6 6.9.4L38 49.1h1.6l.2-.7-.5-.4-.4-.4L29 41l-10.6-7-5.6-4.1-3-2-1.5-2-.6-4.2 2.7-3 3.7.3"
@@ -58,44 +59,43 @@ final class ClaudeCard extends FrameLayout implements Choreographer.FrameCallbac
             + "86l10-12.8 6-7.9 4-4.6-.1-.5h-.3L17.2 77.4l-4.7.6-2-2 .2-3 1-1 8-5.5Z";
 
     private final float dp;
-    private final Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint glow = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint veil = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final RectF box = new RectF();
-    private final Matrix spin = new Matrix();
+    private final Paint veil = new Paint();
     private final LinearLayout column;
-    private final TextView details;
+    private final LinearLayout head;
+    private final TextView titleView;
+    /** All but the name and the title: what opens once the small drop has settled. */
+    private final LinearLayout rest;
+    private final float[] restAlpha = new float[3];
     private final LinearLayout choices;
-    private final Clawd clawd;
+    private final LinearLayout chips;
     private final Spring open;
     private final long born = SystemClock.uptimeMillis();
     private boolean waiting;
-    private boolean running;
-    private int detailsHeight;
-    private float radius;
+    private int restHeight;
+    private int compactW;
+    private int compactH;
+    private int extraW;
+    private int extraH;
+    private Growth growth;
+    private View phone;
 
     ClaudeCard(Context context, float dp, String from, String title, String text, String detailText,
                List<String> options, Bitmap qr, String url, final Choice choice) {
         super(context);
         this.dp = dp;
-        radius = px(18);
         setWillNotDraw(false);
         setClipChildren(false);
         setClipToPadding(false);
-        edge.setStyle(Paint.Style.STROKE);
-        edge.setStrokeWidth(Math.max(1.5f, 1.6f * dp));
-        glow.setStyle(Paint.Style.STROKE);
-        glow.setStrokeWidth(px(5));
-        veil.setColor(0x2E000000);   // only enough for the words to read on bright pictures
+        veil.setColor(0x24000000);   // only enough for the words to read on bright pictures
         waiting = options != null && !options.isEmpty();
 
         column = new LinearLayout(context);
         column.setOrientation(LinearLayout.VERTICAL);
         column.setClipChildren(false);
         column.setClipToPadding(false);
-        column.setPadding(px(18), px(14), px(18), px(16));
+        column.setPadding(px(20), px(14), px(18), px(14));
         // Claude's mark, the name, "now".
-        LinearLayout head = new LinearLayout(context);
+        head = new LinearLayout(context);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
         head.addView(new Mark(context), new LinearLayout.LayoutParams(px(16), px(16)));
@@ -107,39 +107,49 @@ final class ClaudeCard extends FrameLayout implements Choreographer.FrameCallbac
         TextView now = text(context, 10.5f, false);
         now.setText("acum");
         now.setAlpha(0.7f);
-        head.addView(now);
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-2, -2);
+        nlp.leftMargin = px(14);
+        head.addView(now, nlp);
         column.addView(head, new LinearLayout.LayoutParams(-1, -2));
-        TextView titleView = text(context, 15.5f, true);
+        titleView = text(context, 15.5f, true);
         titleView.setText(title == null ? "" : title);
         titleView.setMaxLines(2);
         LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(-1, -2);
-        hlp.topMargin = px(7);
+        hlp.topMargin = px(6);
         column.addView(titleView, hlp);
+
+        rest = new LinearLayout(context);
+        rest.setOrientation(LinearLayout.VERTICAL);
+        rest.setClipChildren(false);
+        rest.setClipToPadding(false);
         if (text != null && !text.isEmpty()) {
             TextView body = text(context, 13, false);
             body.setText(text);
             body.setMaxLines(3);
-            body.setAlpha(0.92f);
             LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-1, -2);
             blp.topMargin = px(4);
-            column.addView(body, blp);
+            restAlpha[rest.getChildCount()] = 0.92f;
+            rest.addView(body, blp);
         }
-        details = text(context, 12.5f, false);
-        details.setMaxLines(12);
-        details.setAlpha(0.9f);
-        details.setLineSpacing(px(2), 1f);
-        details.setText(format(detailText));
-        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-1, 0);
-        dlp.topMargin = px(8);
-        column.addView(details, dlp);
+        CharSequence more = format(detailText);
+        if (more.length() > 0) {
+            TextView details = text(context, 12.5f, false);
+            details.setMaxLines(12);
+            details.setLineSpacing(px(2), 1f);
+            details.setText(more);
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-1, -2);
+            dlp.topMargin = px(8);
+            restAlpha[rest.getChildCount()] = 0.9f;
+            rest.addView(details, dlp);
+        }
 
         choices = new LinearLayout(context);
         choices.setOrientation(LinearLayout.HORIZONTAL);
         choices.setGravity(Gravity.CENTER_VERTICAL);
         choices.setClipChildren(false);
         choices.setClipToPadding(false);
+        chips = new LinearLayout(context);
         if (waiting) {
-            LinearLayout chips = new LinearLayout(context);
             chips.setOrientation(LinearLayout.VERTICAL);
             chips.setClipChildren(false);
             chips.setClipToPadding(false);
@@ -185,23 +195,32 @@ final class ClaudeCard extends FrameLayout implements Choreographer.FrameCallbac
                 LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(-2, -2);
                 plp.leftMargin = px(14);
                 choices.addView(phone, plp);
+                this.phone = phone;
             }
             LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(-1, -2);
             olp.topMargin = px(10);
-            column.addView(choices, olp);
+            restAlpha[rest.getChildCount()] = 1f;
+            rest.addView(choices, olp);
         }
+        column.addView(rest, new LinearLayout.LayoutParams(-1, 0));
         addView(column, new LayoutParams(-1, -2));
+        for (int i = 0; i < rest.getChildCount(); i++) {
+            rest.getChildAt(i).setAlpha(0f);
+        }
 
-        clawd = new Clawd(context);
-        LayoutParams mlp = new LayoutParams(px(60), px(30), Gravity.TOP | Gravity.START);
-        mlp.topMargin = -px(26);   // standing on the top edge
-        addView(clawd, mlp);
-
+        // Opening: the drop widens and grows down, and what was hidden comes in line by line.
         open = new Spring(0f, 0.002f, v -> {
-            LinearLayout.LayoutParams l = (LinearLayout.LayoutParams) details.getLayoutParams();
-            l.height = Math.max(0, Math.round(detailsHeight * v));
-            details.setLayoutParams(l);
-            details.setAlpha(0.9f * Math.max(0f, Math.min(1f, (v - 0.3f) / 0.7f)));
+            float t = Math.max(0f, Math.min(1f, v));
+            LinearLayout.LayoutParams l = (LinearLayout.LayoutParams) rest.getLayoutParams();
+            l.height = Math.round(restHeight * t);
+            rest.setLayoutParams(l);
+            for (int i = 0; i < rest.getChildCount(); i++) {
+                float k = Math.max(0f, Math.min(1f, (t - 0.3f - 0.14f * i) / 0.4f));
+                rest.getChildAt(i).setAlpha(restAlpha[i] * k);
+            }
+            if (growth != null) {
+                growth.grew(extraW * Math.max(0f, v), extraH * Math.max(0f, v));
+            }
         });
     }
 
@@ -209,54 +228,94 @@ final class ClaudeCard extends FrameLayout implements Choreographer.FrameCallbac
         return waiting;
     }
 
-    float radius() {
-        return radius;
+    /**
+     * Measures it small (the name and the title, only as wide as they need) and open
+     * (`fullWidth` wide, everything showing).
+     */
+    void measureFor(int fullWidth) {
+        int free = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
+        LinearLayout.LayoutParams l = (LinearLayout.LayoutParams) rest.getLayoutParams();
+        l.height = LayoutParams.WRAP_CONTENT;
+        rest.setLayoutParams(l);
+        measure(MeasureSpec.makeMeasureSpec(fullWidth, MeasureSpec.EXACTLY), free);
+        int openH = getMeasuredHeight();
+        restHeight = rest.getMeasuredHeight();
+        l.height = 0;
+        rest.setLayoutParams(l);
+        int sides = column.getPaddingLeft() + column.getPaddingRight();
+        int words = Math.round(titleView.getPaint().measureText(String.valueOf(titleView.getText()))) + sides + px(6);
+        head.measure(free, free);
+        int name = head.getMeasuredWidth() + sides;
+        compactW = Math.max(px(250), Math.min(fullWidth, Math.max(words, name)));
+        measure(MeasureSpec.makeMeasureSpec(compactW, MeasureSpec.EXACTLY), free);
+        compactH = getMeasuredHeight();
+        extraW = fullWidth - compactW;
+        extraH = Math.max(0, openH - compactH);
     }
 
-    /** Down from above with a spring; the details open a moment later. */
-    void appear(int width) {
-        details.measure(MeasureSpec.makeMeasureSpec(width - px(36), MeasureSpec.EXACTLY),
-                MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
-        detailsHeight = details.getText().length() == 0 ? 0 : details.getMeasuredHeight();
-        setAlpha(0f);
-        setTranslationY(-px(40));
-        setScaleX(0.96f);
-        setScaleY(0.96f);
-        Spring in = new Spring(0f, 0.002f, v -> {
-            setAlpha(Math.max(0f, Math.min(1f, v * 1.6f)));
-            setTranslationY(-px(40) * (1f - v));
-            setScaleX(0.96f + 0.04f * v);
-            setScaleY(0.96f + 0.04f * v);
-        });
-        in.to(1f, 0.5f, 0.74f);
-        if (detailsHeight > 0) {
-            postDelayed(() -> open.to(1f, 0.6f, 0.84f), 1300);
-        }
+    int compactWidth() {
+        return compactW;
+    }
+
+    int compactHeight() {
+        return compactH;
+    }
+
+    int extraWidth() {
+        return extraW;
+    }
+
+    int extraHeight() {
+        return extraH;
+    }
+
+    void setGrowth(Growth g) {
+        growth = g;
+    }
+
+    /** The small drop has flowed out: it opens, then the first choice takes focus. */
+    void appear() {
+        postDelayed(this::openNow, 760);
         if (waiting) {
             postDelayed(() -> {
                 View first = findFirstFocusable(choices);
                 if (first != null) {
                     first.requestFocus();
                 }
-            }, 350);
+            }, 1250);
         }
     }
 
-    /** The answer was given: a check mark, Clawd jumps, then the card leaves. */
-    void answered(String label, Runnable gone) {
+    /** The answer was given: its capsule stays lit, with a check mark; the others fade. */
+    void answered(int index, String label) {
         waiting = false;
-        clawd.jump();
-        choices.removeAllViews();
-        TextView done = text(getContext(), 13.5f, true);
-        done.setTextColor(0xFFF8C9B4);
-        done.setText("✓  " + label);
-        choices.addView(done);
-        postDelayed(() -> disappear(gone), 1500);
+        for (int i = 0; i < chips.getChildCount(); i++) {
+            final View c = chips.getChildAt(i);
+            if (i == index && c instanceof TextView) {
+                ((TextView) c).setText("\u2713  " + label);
+                c.animate().scaleX(1.05f).scaleY(1.05f).setDuration(140)
+                        .withEndAction(() -> c.animate().scaleX(1f).scaleY(1f).setDuration(260).start()).start();
+            } else {
+                c.animate().alpha(0.3f).setDuration(260).start();
+            }
+        }
+        if (phone != null) {
+            phone.animate().alpha(0.3f).setDuration(260).start();
+        }
     }
 
-    void disappear(Runnable gone) {
-        animate().alpha(0f).translationY(-px(30)).scaleX(0.97f).scaleY(0.97f).setDuration(360)
-                .withEndAction(gone).start();
+    /** Opens now (also when the remote chooses it among the notices). */
+    void openNow() {
+        if (growth != null && open.target() < 1f) {
+            open.to(1f, 0.56f, 0.8f);
+        }
+    }
+
+    /** Leaving: nothing more opens. */
+    void closing() {
+        waiting = false;
+        growth = null;
+        open.stop();
     }
 
     private static View findFirstFocusable(View v) {
@@ -275,60 +334,12 @@ final class ClaudeCard extends FrameLayout implements Choreographer.FrameCallbac
         return null;
     }
 
-    // ------------------------------------------------------------------ drawing
-
-    @Override
-    protected void onAttachedToWindow() {
-        super.onAttachedToWindow();
-        running = true;
-        Choreographer.getInstance().postFrameCallback(this);
-    }
-
-    @Override
-    protected void onDetachedFromWindow() {
-        running = false;
-        Choreographer.getInstance().removeFrameCallback(this);
-        super.onDetachedFromWindow();
-    }
-
-    @Override
-    public void doFrame(long now) {
-        if (!running) {
-            return;
-        }
-        invalidate();
-        clawd.step();
-        Choreographer.getInstance().postFrameCallback(this);
-    }
-
-    private float t() {
-        return (SystemClock.uptimeMillis() - born) / 1000f;
-    }
-
     @Override
     protected void onDraw(Canvas canvas) {
-        box.set(0, 0, getWidth(), getHeight());
-        canvas.drawRoundRect(box, radius, radius, veil);
+        canvas.drawRect(0, 0, getWidth(), getHeight(), veil);
     }
 
-    @Override
-    protected void dispatchDraw(Canvas canvas) {
-        super.dispatchDraw(canvas);
-        // The edge: Claude's colours going round, faster while a question waits.
-        float half = edge.getStrokeWidth() / 2;
-        box.set(half, half, getWidth() - half, getHeight() - half);
-        SweepGradient sweep = new SweepGradient(getWidth() / 2f, getHeight() / 2f, EDGE, null);
-        spin.setRotate((t() * (waiting ? 110f : 55f)) % 360f, getWidth() / 2f, getHeight() / 2f);
-        sweep.setLocalMatrix(spin);
-        glow.setShader(sweep);
-        glow.setAlpha(55);
-        canvas.drawRoundRect(box, radius, radius, glow);
-        edge.setShader(sweep);
-        edge.setAlpha(230);
-        canvas.drawRoundRect(box, radius, radius, edge);
-    }
-
-    // ------------------------------------------------------------------ Claude's mark and Clawd
+    // ------------------------------------------------------------------ Claude's mark
 
     /** Claude's mark, in Claude's colour. */
     private static final class Mark extends View {
@@ -354,81 +365,17 @@ final class ClaudeCard extends FrameLayout implements Choreographer.FrameCallbac
         }
     }
 
-    /**
-     * Claude Code's mascot, Clawd, as in its terminal picture: an orange body with two eyes, arms
-     * out at the sides and four short legs, drawn in pixels.
-     */
-    private final class Clawd extends View {
-        private static final int W = 18;
-        private final Paint body = new Paint();
-        private final Paint eye = new Paint();
-        private float x = 0.12f;      // where it stands along the edge (0..1 of the free width)
-        private float dir = 1f;
-        private float jumpAt = -10f;
-        private long last;
-
-        Clawd(Context context) {
-            super(context);
-            body.setColor(CORAL);
-            eye.setColor(0xFF1A1A1A);
-        }
-
-        void jump() {
-            jumpAt = t();
-        }
-
-        void step() {
-            long now = SystemClock.uptimeMillis();
-            float dt = last == 0 ? 0.016f : Math.min(0.05f, (now - last) / 1000f);
-            last = now;
-            if (waiting) {
-                x += dir * dt * 0.09f;
-                if (x > 0.88f || x < 0.04f) {
-                    dir = -dir;
-                    x = Math.max(0.04f, Math.min(0.88f, x));
-                }
-            }
-            View parent = (View) getParent();
-            if (parent != null) {
-                setTranslationX(x * Math.max(0, parent.getWidth() - getWidth()));
-            }
-            invalidate();
-        }
-
-        @Override
-        protected void onDraw(Canvas c) {
-            float p = getWidth() / (float) W;      // one pixel
-            float t = t();
-            boolean walking = waiting;
-            int frame = (int) (t * (walking ? 6 : 2)) % 2;
-            float bob = walking ? (frame == 0 ? 0 : -p * 0.5f) : (float) Math.sin(t * 2.2f) * p * 0.35f;
-            float j = t - jumpAt;
-            if (j >= 0 && j < 0.5f) {
-                bob -= (float) Math.sin(j / 0.5f * Math.PI) * p * 4;
-            }
-            boolean blink = (t % 3.4f) < 0.12f;
-            boolean arms = j >= 0 && j < 1.2f && ((int) (j * 8) % 2 == 0);   // waving when answered
-            float top = getHeight() - 5 * p + bob;
-            // Body x3..14, rows 0..3.
-            c.drawRect(3 * p, top, 15 * p, top + 4 * p, body);
-            // Arms on row 2 (raised to row 1 when it waves).
-            float ay = top + (arms ? 1 : 2) * p;
-            c.drawRect(1 * p, ay, 3 * p, ay + p, body);
-            c.drawRect(15 * p, ay, 17 * p, ay + p, body);
-            // Eyes at (5,1) and (12,1), shut for a moment now and then.
-            if (!blink) {
-                c.drawRect(5 * p, top + p, 6 * p, top + 2 * p, eye);
-                c.drawRect(12 * p, top + p, 13 * p, top + 2 * p, eye);
-            }
-            // Legs on row 4: x 4, 6, 11, 13; while walking the pairs step in turn.
-            float ly = top + 4 * p;
-            float liftA = walking && frame == 0 ? -p * 0.6f : 0;
-            float liftB = walking && frame == 1 ? -p * 0.6f : 0;
-            c.drawRect(4 * p, ly + liftA, 5 * p, ly + p, body);
-            c.drawRect(6 * p, ly + liftB, 7 * p, ly + p, body);
-            c.drawRect(11 * p, ly + liftA, 12 * p, ly + p, body);
-            c.drawRect(13 * p, ly + liftB, 14 * p, ly + p, body);
-        }
+    /** Claude's mark as a picture `size` pixels square, in `color`. */
+    static Bitmap markBitmap(int size, int color) {
+        Bitmap b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(color);
+        Path path = svg(MARK_PATH);
+        Matrix fit = new Matrix();
+        fit.setScale(size / 100f, size / 100f);
+        path.transform(fit);
+        new Canvas(b).drawPath(path, paint);
+        return b;
     }
 
     /** A path from SVG path data (the commands M L H V C Z, absolute and relative). */

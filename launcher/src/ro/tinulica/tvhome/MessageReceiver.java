@@ -13,7 +13,9 @@ import android.content.Intent;
  *
  * With "details", "options" or "style" it is a larger card (ClaudeCard; see SourcesService.claude):
  * "options" (separated by |) makes it a question, answered with the remote or from the phone.
- * "b64" true: the texts are base64 (UTF-8), so any text survives the shell.
+ * "b64" true: the texts are base64 (UTF-8), so any text survives the shell. "account" is the
+ * Claude account it comes from (tvtool sends it): it shows only on a profile linked to that
+ * account and waits for one otherwise (see ClaudeLink).
  */
 public final class MessageReceiver extends BroadcastReceiver {
 
@@ -26,6 +28,11 @@ public final class MessageReceiver extends BroadcastReceiver {
             title = decode(title);
             text = decode(text);
             from = decode(from);
+        }
+        String account = intent.getStringExtra("account");
+        if (account != null && !intent.hasExtra("dismiss") && !ClaudeLink.shows(context, account)) {
+            SourcesService.hold(intent);
+            return;
         }
         SourcesService service = SourcesService.instance;
         boolean card = intent.hasExtra("style") || intent.hasExtra("options") || intent.hasExtra("details")

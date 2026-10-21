@@ -2,7 +2,8 @@
 
 **An Apple TV–style home screen for TCL Google TVs**, with Liquid Glass, smooth animations,
 previews from your apps, a Control Center, search across your streaming apps, a Cinema mode that
-helps you choose a film, weather and warning notices, and a small tool that cleans up the TV.
+helps you choose a film, weather and warning notices, messages and questions from your computer
+(made for an AI assistant working while you watch), and a small tool that cleans up the TV.
 
 [Română](README.ro.md)
 
@@ -12,6 +13,9 @@ helps you choose a film, weather and warning notices, and a small tool that clea
 > TV 12 (4K, Europe). It relies on how TCL's system behaves (its settings pages, inputs and power
 > manager), so on other brands parts of it will not work. It is a personal project, not affiliated
 > with Apple, TCL or Google.
+>
+> **Open source, and still rough in places.** There are bugs; they can be fixed. Issues and pull
+> requests are welcome.
 
 ---
 
@@ -83,13 +87,58 @@ screen, over anything you are watching (except Cinema mode), with a quiet glass 
   forecast says the sky will change, otherwise every half hour.
 - **Warnings**: yellow, orange and red warnings for your county (Romania, from MeteoAlarm).
 - **Notifications** from your apps (optional, see [Install](#7-turn-on-the-extras-optional)).
-- **Messages from your computer**: a script can show a message on the TV:
+- **Messages from your computer**: see [below](#messages-and-questions-from-your-computer).
 
-  ```bash
-  adb shell am broadcast -n ro.tinulica.tvhome/.MessageReceiver --es title "Backup done" --es text "All good"
-  ```
+Several at once stack under each other and make room for each other as they come and go; when
+they would not fit on the screen, the oldest leaves. On the home screen, **Left** at the left edge
+takes the remote into them: **Up / Down** go from one to the next (the one you are on comes
+forward and opens up to show all its words), **Back** closes it, **Right** goes back out. While
+you are in them, none leaves on its own.
 
 ![Notices](docs/images/notifications.jpg)
+
+### Messages and questions from your computer
+
+Made for an AI assistant (Claude) that works on your computer while you watch TV, so that you can
+follow it and answer it from the sofa; any script can use it.
+
+- **Messages** come out of the left edge as a small drop of Liquid Glass with Claude's mark and
+  the title, which then opens up, wider and down, with the text and any details (lines starting
+  with `- ` are a list, `**words**` are bold).
+- **Clawd**, Claude Code's pixel mascot, lands on the top edge and does something different for
+  each message: waves hello, hops with happy eyes when something is done, throws confetti, walks
+  under a question mark while a question waits, holds its arms up when it needs you, works under
+  Claude's spinning mark, sends a heart, or sleeps. It is chosen from the words (or with `--mood`),
+  and is not the same twice in a row.
+- **Questions** show their answers as glass buttons: choose one with the remote, or scan the QR
+  code and answer from your phone (while the question waits, the TV serves a small page on your
+  home network). The computer gets the answer.
+- **Tasks**: a short to-do list under the weather when the TV comes on (the weather first, then it
+  opens down to the list), with Liquid Glass check marks that fill in as things get done.
+- **Usage**: a small glass pill at the top left of the home screen with how much of the plan is
+  used and when it resets. It shows only on the home screen itself, and rises out of the way while
+  notices show.
+- **One account per profile**: every computer that talks to the TV is an account. In Control
+  Center, the round Claude shortcut chooses which account the profile in use sees, or none. Other
+  profiles see nothing of it; their messages wait until a profile linked to them is in use.
+
+```bash
+python tvtool.py claude --name "Ana"                       # name this computer's account on the TV
+python tvtool.py say "Backup done" "All good" --details $'- 120 GB copied\n- **no errors**'
+python tvtool.py ask "Deploy now?" --options "Yes|Not yet"  # prints the answer
+python tvtool.py tasks --add "Renew the domain" --done 1    # the list under the weather
+python tvtool.py usage 18 --resets "resets at 02:20"        # the pill at the top left
+```
+
+A plain broadcast works too, from any script:
+
+```bash
+adb shell am broadcast -n ro.tinulica.tvhome/.MessageReceiver --es title "Backup done" --es text "All good"
+```
+
+![A message from Claude](docs/images/claude-message.jpg)
+
+![Out small, then it opens](docs/images/claude-opening.jpg)
 
 ### Search
 
@@ -244,6 +293,18 @@ python tvtool.py shot home                                             # a scree
 
 `python tvtool.py -h` lists every command; `python tvtool.py <command> -h` its options.
 
+### 10. Messages from your computer (optional)
+
+```bash
+python tvtool.py claude --name "Ana"            # this computer becomes an account on the TV
+python tvtool.py say "Hello from the computer"  # a first message
+```
+
+The first profile sees the first account until it chooses; any profile chooses its own in Control
+Center (the round Claude shortcut). To let an AI assistant use it, tell it to run `tvtool say` when it
+finishes something or needs you, and `tvtool ask` when it needs an answer (the command waits and
+prints the answer). The QR codes need `segno` (in `requirements.txt`).
+
 ---
 
 ## Using it with the remote
@@ -256,6 +317,9 @@ python tvtool.py shot home                                             # a scree
 | An app | Hold OK | Move it with Left / Right; OK or Back puts it down |
 | Anywhere | Hold Back | Recent apps (let go once the ring is full); Up on one closes it |
 | Anywhere | Volume | The glass volume bar |
+| Home, notices showing | Left at the left edge | Into the notices: Up / Down between them, Back closes one, Right goes out |
+| A question from the computer | Up / Down, OK | Choose an answer; Back closes it without one |
+| Control Center | OK on the Claude circle | Which computer's messages this profile sees |
 | Control Center | Hold OK on a shortcut | Move or remove it; **+** adds one |
 | Control Center | OK / hold OK on a profile | Switch to it / edit it |
 | Search | Letters, OK, Down | Type; the results; *Watch on …* and *Trailer* |
@@ -303,6 +367,8 @@ TV Home has no account, no analytics and no server of its own. It connects to:
 | YouTube / Vimeo | Trailers | The trailer's ID |
 
 Everything else (profiles, the dock, your choices) stays on the TV. `tvtool` talks only to your TV.
+While a question from the computer waits, the TV answers on port 8642 of your home network (the
+page the QR code opens); it closes with the question.
 
 ---
 
@@ -332,6 +398,10 @@ Everything else (profiles, the dock, your choices) stays on the TV. `tvtool` tal
   title again right after.
 - **Search or Cinema mode say they need a key**: `python tvtool.py tmdb`.
 - **Anything looks wrong after an update**: `python tvtool.py restore`, then `launcher` again.
+- **A message from the computer does not show**: the profile in use is not linked to that computer's
+  account (Control Center, the Claude circle); it shows once a linked profile is in use. While the
+  service is off (see the first point) it comes as a plain system toast.
+- **The phone cannot open the question's page**: the phone must be on the same network as the TV.
 
 ---
 
@@ -365,7 +435,8 @@ tvtool.py          the command-line tool: connect, backup, debloat, install, res
 catalog.py         known TCL / Google TV packages and what each one does
 launcher/          TV Home, the Android app
   src/             Java sources: MainActivity (the home screen), SourcesService (the accessibility
-                   service: notices, hold Back, volume), CinemaActivity, LiquidDrop, ...
+                   service: notices, hold Back, volume), CinemaActivity, LiquidDrop, ClaudeCard,
+                   Clawd, ClaudeLink (accounts per profile), QuestionServer (answers from a phone), ...
   assets/          wallpapers, sounds, avatars, Cinema mode's pictures
   build.sh         the build script
 dist/tv-home.apk   the built app
@@ -389,6 +460,10 @@ docs/              these images, and notes on how the Liquid Glass is drawn
   not endorsed or certified by TMDB.*
 - **Weather**: [Open-Meteo](https://open-meteo.com) (CC BY 4.0). **Warnings**: MeteoAlarm / EUMETNET.
 - **Sounds**: made for this project by the scripts in `tools/`.
+- **Clawd**: drawn from the 12 × 8 pixel grid that [ClawdMoji](https://github.com/afspies/ClawdMoji)
+  (MIT) recovered from Claude Code's logo; the poses are this project's own. **Claude's mark**: the
+  symbol on Wikimedia Commons.
 
-Apple TV, tvOS and Liquid Glass are trademarks of Apple Inc.; TCL, Google TV, Netflix and the other
-app names belong to their owners. This project is not affiliated with any of them.
+Apple TV, tvOS and Liquid Glass are trademarks of Apple Inc.; Claude, the Claude logo and Clawd are
+trademarks of Anthropic; TCL, Google TV, Netflix and the other app names belong to their owners.
+This project is not affiliated with, or endorsed by, any of them.

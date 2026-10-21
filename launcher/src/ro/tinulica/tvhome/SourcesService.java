@@ -390,7 +390,185 @@ public final class SourcesService extends AccessibilityService {
 
     private FrameLayout claudeLayer;
     private ClaudeCard claudeCard;
+    private LiquidDrop claudeDrop;
+    private Clawd clawd;
     private String claudeId;
+    /** The height the Claude card takes at the top of the stack (open), 0 when there is none. */
+    private int claudeReserved;
+
+    /** Told when notices start or stop showing (the home screen moves its usage pill out of the way). */
+    interface NoticeWatcher {
+        void changed(boolean up);
+    }
+
+    private static NoticeWatcher noticeWatcher;
+    private boolean noticesShowing;
+    /** Each notice's timer to leave (paused while the remote is in the notices). */
+    private final java.util.Map<LiquidDrop, Runnable> dropTimers = new java.util.HashMap<>();
+    /** Which notice the remote has chosen (Left into them from the home screen), -1 when none. */
+    private int chosenNotice = -1;
+
+    /** The notices from the top: the Claude card first, then the others, not those leaving. */
+    private List<LiquidDrop> noticeList() {
+        List<LiquidDrop> all = new ArrayList<>();
+        if (claudeLayer != null && claudeDrop != null) {
+            all.add(claudeDrop);
+        }
+        for (LiquidDrop d : drops) {
+            if (!d.isLeaving()) {
+                all.add(d);
+            }
+        }
+        return all;
+    }
+
+    /**
+     * Into the notices with the remote: the top one is chosen (it comes forward, lit) and none
+     * leaves on its own meanwhile. Up and Down go from one to the next, Back closes the chosen
+     * one, OK opens a Claude card's details, Right (or any other key) goes back out.
+     */
+    boolean enterNotices() {
+        List<LiquidDrop> all = noticeList();
+        if (all.isEmpty()) {
+            return false;
+        }
+        chosenNotice = 0;
+        for (Runnable r : dropTimers.values()) {
+            handler.removeCallbacks(r);
+        }
+        if (claudeCard != null && !claudeCard.waiting()) {
+            handler.removeCallbacks(claudeTimeout);
+        }
+        sounds.play("move");
+        showChosen();
+        return true;
+    }
+
+    private void showChosen() {
+        List<LiquidDrop> all = noticeList();
+        if (all.isEmpty()) {
+            leaveNotices();
+            return;
+        }
+        chosenNotice = Math.max(0, Math.min(chosenNotice, all.size() - 1));
+        for (int i = 0; i < all.size(); i++) {
+            all.get(i).setChosen(i == chosenNotice);
+        }
+        // The chosen one opens up (all its words, a Claude card's details); the others make room.
+        if (all.get(chosenNotice) == claudeDrop && claudeCard != null) {
+            claudeCard.openNow();
+        }
+        placeDrops();
+    }
+
+    private void leaveNotices() {
+        if (chosenNotice < 0) {
+            return;
+        }
+        chosenNotice = -1;
+        for (LiquidDrop d : noticeList()) {
+            d.setChosen(false);
+        }
+        // They leave a little after, one by one.
+        long at = 3500;
+        for (LiquidDrop d : drops) {
+            Runnable r = dropTimers.get(d);
+            if (r != null && !d.isLeaving()) {
+                handler.postDelayed(r, at);
+                at += 900;
+            }
+        }
+        if (claudeCard != null && !claudeCard.waiting()) {
+            handler.postDelayed(claudeTimeout, 6000);
+        }
+    }
+
+    private boolean noticeKey(KeyEvent event) {
+        int code = event.getKeyCode();
+        boolean press = event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0;
+        List<LiquidDrop> all = noticeList();
+        if (all.isEmpty()) {
+            leaveNotices();
+            return false;
+        }
+        switch (code) {
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                if (press) {
+                    int to = chosenNotice + (code == KeyEvent.KEYCODE_DPAD_UP ? -1 : 1);
+                    if (to < 0 || to >= all.size()) {
+                        sounds.play("limit");
+                    } else {
+                        chosenNotice = to;
+                        sounds.play("move");
+                        showChosen();
+                    }
+                }
+                return true;
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                if (press) {
+                    sounds.play("limit");
+                }
+                return true;
+            case KeyEvent.KEYCODE_BACK:
+                if (press) {
+                    LiquidDrop d = all.get(chosenNotice);
+                    sounds.play("back");
+                    if (d == claudeDrop) {
+                        claudeAnswered(claudeId, -1, "");
+                    } else {
+                        dismissDrop(d);
+                    }
+                    handler.postDelayed(this::showChosen, 60);
+                }
+                return true;
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                if (press) {
+                    LiquidDrop d = all.get(chosenNotice);
+                    if (d == claudeDrop && claudeCard != null && claudeCard.waiting()) {
+                        leaveNotices();    // its window takes the keys: the choices
+                    }
+                }
+                return true;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                if (press) {
+                    sounds.play("move");
+                    leaveNotices();
+                }
+                return true;
+            default:
+                leaveNotices();
+                return false;
+        }
+    }
+
+    static void watchNotices(NoticeWatcher w) {
+        noticeWatcher = w;
+    }
+
+    /** Whether a notice, an alert or a Claude card is on the screen (not on its way out). */
+    static boolean noticesUp() {
+        SourcesService s = instance;
+        return s != null && s.noticesShowing;
+    }
+
+    private void noticesChanged() {
+        boolean up = claudeLayer != null;
+        for (LiquidDrop d : drops) {
+            up |= !d.isLeaving();
+        }
+        if (up != noticesShowing) {
+            noticesShowing = up;
+            NoticeWatcher w = noticeWatcher;
+            if (w != null) {
+                w.changed(up);
+            }
+        }
+    }
+    /** Messages for an account the profile in use is not linked to, kept until it is. */
+    private static final List<Intent> held = new ArrayList<>();
     private final QuestionServer questions = new QuestionServer(this::claudeAnswered);
     private final Runnable claudeTimeout = () -> claudeAnswered(claudeId, -1, "");
 
@@ -410,8 +588,8 @@ public final class SourcesService extends AccessibilityService {
     /**
      * A message from Claude (MessageReceiver): a ClaudeCard at the top left. With "options" it is
      * a question: the remote or the phone (QuestionServer) answers it, and the answer is written to
-     * files/claude/answer-ID.txt for the computer to read. "dismiss" with an ID takes a card away.
-     * False when our overlay cannot show.
+     * files/claude/answer-ID.txt for the computer to read. "dismiss" with an ID takes a card away;
+     * "mood" says what Clawd does (else the words decide). False when our overlay cannot show.
      */
     boolean claude(final Intent intent) {
         if (windows == null || !connected()) {
@@ -432,6 +610,7 @@ public final class SourcesService extends AccessibilityService {
             final String text = extra(intent, "text", b64);
             final String details = extra(intent, "details", b64);
             final String from = extra(intent, "from", b64);
+            final String mood = extra(intent, "mood", b64);
             String opts = extra(intent, "options", b64);
             final List<String> options = new ArrayList<>();
             if (opts != null) {
@@ -449,13 +628,18 @@ public final class SourcesService extends AccessibilityService {
             }
             final android.graphics.Bitmap code = qr;
             final int timeout = intent.getIntExtra("timeout", options.isEmpty() ? 0 : 600);
-            captureBehind(() -> showClaude(id, from, title, text, details, options, code, timeout));
+            captureBehind(() -> showClaude(id, from, title, text, details, options, code, timeout, mood));
         });
         return true;
     }
 
+    /**
+     * The message as a drop of Liquid Glass flowing out of the left edge, like every notice, a
+     * little wider and taller; with details it opens further once settled, growing downwards.
+     * Clawd lands on its top edge. A question's window takes the remote's keys.
+     */
     private void showClaude(final String id, String from, String title, String text, String details,
-                            List<String> options, android.graphics.Bitmap qr, int timeout) {
+                            List<String> options, android.graphics.Bitmap qr, int timeout, String mood) {
         closeClaude();
         final boolean asking = !options.isEmpty();
         claudeId = id;
@@ -493,12 +677,33 @@ public final class SourcesService extends AccessibilityService {
         layer.setClipChildren(false);
         final ClaudeCard card = new ClaudeCard(this, dp, from, title, text, details, options, qr, null,
                 (index, label) -> claudeAnswered(id, index, label));
-        // Liquid Glass, as the other panes the service draws (lens over the screen behind).
-        glassOn(card, card.radius(), 0x1FFFFFFF, 0xA6141417);
-        int width = px(asking ? 440 : 400);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(width, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        lp.topMargin = px(40);   // room above for Clawd
-        layer.addView(card, lp);
+        int w = px(asking ? 420 : 380);
+        card.measureFor(w);
+        int h = card.compactHeight();
+        // Out small (the name and the title), then it opens wider and down.
+        final LiquidDrop drop = new LiquidDrop(this, dp, card, card.compactWidth(), h);
+        drop.setCorner(px(24));
+        drop.allowGrowth(card.extraWidth(), card.extraHeight());
+        card.setGrowth((wider, taller) -> {
+            drop.setExtraWidth(wider);
+            drop.setExtra(taller);
+        });
+        android.util.DisplayMetrics m = getResources().getDisplayMetrics();
+        drop.setBehind(behind, m.widthPixels, m.heightPixels);
+        // First at the top (below the usage pill, with room for Clawd); the notices make room under it.
+        int y = claudeTop();
+        claudeReserved = h + card.extraHeight();
+        placeDrops();
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(drop.viewWidth(), drop.viewHeight(),
+                Gravity.TOP | Gravity.START);
+        lp.topMargin = y - (drop.viewHeight() - h) / 2;
+        layer.addView(drop, lp);
+        final Clawd mascot = new Clawd(this, dp, Clawd.moodFor(mood, title, text, asking));
+        FrameLayout.LayoutParams mlp = new FrameLayout.LayoutParams(w - px(44), Clawd.viewHeight(dp),
+                Gravity.TOP | Gravity.START);
+        mlp.leftMargin = px(16);
+        mlp.topMargin = y - Clawd.viewHeight(dp) + px(1);   // standing on the glass
+        layer.addView(mascot, mlp);
         try {
             windows.addView(layer, overlayParams(asking));
         } catch (RuntimeException e) {
@@ -507,7 +712,12 @@ public final class SourcesService extends AccessibilityService {
         }
         claudeLayer = layer;
         claudeCard = card;
-        card.appear(width);
+        claudeDrop = drop;
+        clawd = mascot;
+        noticesChanged();
+        drop.appear();
+        card.appear();
+        mascot.arrive(1350);
         chime("notice.ogg");
         if (asking) {
             QuestionServer.Question q = new QuestionServer.Question();
@@ -543,46 +753,94 @@ public final class SourcesService extends AccessibilityService {
                     // The computer will time out.
                 }
             }
-            final FrameLayout layer = claudeLayer;
-            final ClaudeCard card = claudeCard;
-            if (layer != null) {
-                try {
-                    windows.updateViewLayout(layer, overlayParams(false));
-                } catch (RuntimeException ignored) {
-                    // Gone already.
-                }
-            }
-            claudeId = null;
-            claudeLayer = null;
-            claudeCard = null;
-            if (card == null) {
-                return;
-            }
-            Runnable gone = () -> {
-                if (layer != null) {
-                    removeQuietly(layer);
-                }
-            };
-            if (index >= 0 && card.waiting()) {
-                sounds.play("select");
-                card.answered(label, gone);
-            } else {
-                card.disappear(gone);
-            }
+            boolean chosen = index >= 0 && claudeCard != null && claudeCard.waiting();
+            retireClaude(chosen, index, label);
         });
     }
 
+    /** The card in place goes (flowing back into the edge); nothing is written down. */
     private void closeClaude() {
         handler.removeCallbacks(claudeTimeout);
         if (claudeId != null) {
             questions.close(claudeId);
         }
-        if (claudeLayer != null) {
-            removeQuietly(claudeLayer);
-        }
+        retireClaude(false, -1, "");
+    }
+
+    /**
+     * Sends the card in place away. Answered, its choice stays lit while Clawd jumps; then Clawd
+     * hops off and the drop flows back into the edge. Its window stops taking keys at once.
+     */
+    private void retireClaude(boolean chosen, int index, String label) {
+        final FrameLayout layer = claudeLayer;
+        final ClaudeCard card = claudeCard;
+        final LiquidDrop drop = claudeDrop;
+        final Clawd mascot = clawd;
+        claudeId = null;
         claudeLayer = null;
         claudeCard = null;
-        claudeId = null;
+        claudeDrop = null;
+        clawd = null;
+        noticesChanged();
+        if (layer == null) {
+            return;
+        }
+        // The notices under it flow up as it goes.
+        handler.postDelayed(() -> {
+            if (claudeLayer == null) {
+                claudeReserved = 0;
+                placeDrops();
+            }
+        }, chosen ? 1800 : 300);
+        try {
+            windows.updateViewLayout(layer, overlayParams(false));
+        } catch (RuntimeException ignored) {
+            // Gone already.
+        }
+        final Runnable gone = () -> removeQuietly(layer);
+        Runnable leave = () -> {
+            card.closing();
+            mascot.leave();
+            layer.postDelayed(() -> drop.disappear(gone), 200);
+            handler.postDelayed(gone, 3000);   // in case the animation never ends
+        };
+        if (chosen) {
+            sounds.play("select");
+            card.answered(index, label);
+            mascot.jump();
+            handler.postDelayed(leave, 1500);
+        } else {
+            leave.run();
+        }
+    }
+
+    /** A message for an account this profile is not linked to: kept until one that is comes. */
+    static void hold(Intent intent) {
+        synchronized (held) {
+            held.add(intent);
+            while (held.size() > 4) {
+                held.remove(0);
+            }
+        }
+    }
+
+    /** Another profile is in use: what was kept for its account shows now, one after another. */
+    static void profileChanged(final Context context) {
+        List<Intent> now = new ArrayList<>();
+        synchronized (held) {
+            for (java.util.Iterator<Intent> it = held.iterator(); it.hasNext(); ) {
+                Intent i = it.next();
+                if (ClaudeLink.shows(context, i.getStringExtra("account"))) {
+                    now.add(i);
+                    it.remove();
+                }
+            }
+        }
+        android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+        for (int k = 0; k < now.size(); k++) {
+            final Intent i = now.get(k);
+            main.postDelayed(() -> new MessageReceiver().onReceive(context.getApplicationContext(), i), 900 + 5000L * k);
+        }
     }
 
     /** A short message (what just happened, as a toast would say it) as a drop at the left edge. */
@@ -934,8 +1192,11 @@ public final class SourcesService extends AccessibilityService {
         tlp.rightMargin = px(16);
         tlp.topMargin = px(9);
         column.addView(list, tlp);
-        int h = px(54 + 9 + 16 + 6 + 26 * tasks.size() + 12);
-        showDrop(column, scene, px(300), h, "notice.ogg", 12000 + 2500L * tasks.size(), false, px(24));
+        // Out as the weather alone, then it opens down to the tasks.
+        column.measure(View.MeasureSpec.makeMeasureSpec(px(300), View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        int rest = column.getMeasuredHeight() + px(12) - px(54);
+        showDrop(column, scene, px(300), px(54), "notice.ogg", 12000 + 2500L * tasks.size(), false, px(24), rest);
     }
 
     private void showAlert(Weather.Alert a) {
@@ -959,11 +1220,13 @@ public final class SourcesService extends AccessibilityService {
      */
     private void showDrop(final View content, final LiquidDrop.Backdrop scene, final int w, final int h,
                           final String sound, final long showFor, final boolean anyway) {
-        showDrop(content, scene, w, h, sound, showFor, anyway, 0);
+        showDrop(content, scene, w, h, sound, showFor, anyway, 0, 0);
     }
 
+    /** `opens`: how much taller it gets once it has flowed out (it comes out `h` tall first). */
     private void showDrop(final View content, final LiquidDrop.Backdrop scene, final int w, final int h,
-                          final String sound, final long showFor, final boolean anyway, final int corner) {
+                          final String sound, final long showFor, final boolean anyway, final int corner,
+                          final int opens) {
         if ((CinemaActivity.alive && !anyway) || windows == null) {
             return;
         }
@@ -989,9 +1252,27 @@ public final class SourcesService extends AccessibilityService {
                     staying--;
                 }
             }
+            // They fit the screen's height: the oldest make room when the new one would not.
+            int room = getResources().getDisplayMetrics().heightPixels - px(60) - dropsTop();
+            int used = h;
+            for (LiquidDrop d : drops) {
+                used += d.isLeaving() ? 0 : d.capsuleHeight() + px(30);
+            }
+            for (int i = 0; i < drops.size() && used > room; i++) {
+                LiquidDrop d = drops.get(i);
+                if (!d.isLeaving()) {
+                    used -= d.capsuleHeight() + px(30);
+                    dismissDrop(d);
+                }
+            }
             final LiquidDrop drop = new LiquidDrop(this, dp, content, w, h);
-            if (corner > 0) {
-                drop.setCorner(corner);
+            // A long notice stays a panel with soft corners, not a fat pill.
+            drop.setCorner(corner > 0 ? corner : px(26));
+            drop.allowGrowth(opens + px(150));
+            drop.setOpensText(true);
+            drop.setOnResize(this::placeDrops);
+            if (opens > 0) {
+                drop.openBy(opens, 800);
             }
             if (scene != null) {
                 drop.setBackdrop(scene);
@@ -1000,34 +1281,58 @@ public final class SourcesService extends AccessibilityService {
             drop.setBehind(behind, m.widthPixels, m.heightPixels);
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(drop.viewWidth(), drop.viewHeight(),
                     Gravity.TOP | Gravity.START);
-            int y = px(69);
+            int y = dropsTop();
             for (LiquidDrop d : drops) {
                 y += d.capsuleHeight() + px(30);
             }
             lp.topMargin = y + h / 2 - drop.viewHeight() / 2;
             dropLayer.addView(drop, lp);
             drops.add(drop);
+            noticesChanged();
             drop.appear();
             if (sound != null) {
                 chime(sound);
             }
-            handler.postDelayed(() -> dismissDrop(drop), showFor);
+            Runnable timer = () -> dismissDrop(drop);
+            dropTimers.put(drop, timer);
+            if (chosenNotice < 0) {
+                handler.postDelayed(timer, showFor);
+            }
         });
     }
 
     private void dismissDrop(final LiquidDrop drop) {
+        Runnable timer = dropTimers.remove(drop);
+        if (timer != null) {
+            handler.removeCallbacks(timer);
+        }
         drop.disappear(() -> {
             drops.remove(drop);
             if (dropLayer != null) {
                 dropLayer.removeView(drop);
             }
             placeDrops();
+            noticesChanged();
         });
+        noticesChanged();
+        if (chosenNotice >= 0) {
+            handler.post(this::showChosen);
+        }
+    }
+
+    /** Where the Claude card's glass starts, with Clawd's room above (the usage pill moves away). */
+    private int claudeTop() {
+        return px(86);
+    }
+
+    /** Where the first notice goes: the top, or under the Claude card when one is showing. */
+    private int dropsTop() {
+        return claudeReserved > 0 ? claudeTop() + claudeReserved + px(30) : px(69);
     }
 
     /** One under the other from the top, with room for their fillets; the others flow up into place. */
     private void placeDrops() {
-        int y = px(69);
+        int y = dropsTop();
         for (final LiquidDrop d : drops) {
             FrameLayout.LayoutParams dl = (FrameLayout.LayoutParams) d.getLayoutParams();
             int to = y + d.capsuleHeight() / 2 - d.viewHeight() / 2;
@@ -1840,6 +2145,9 @@ public final class SourcesService extends AccessibilityService {
                 }
             }
             return false;
+        }
+        if (chosenNotice >= 0) {
+            return noticeKey(event);
         }
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
             return backKey(event);

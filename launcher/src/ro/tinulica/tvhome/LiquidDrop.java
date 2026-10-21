@@ -10,9 +10,15 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.TextView;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A notice as a drop of Liquid Glass at the left edge of the screen, moving like water:
@@ -64,6 +70,26 @@ final class LiquidDrop extends FrameLayout implements android.view.Choreographer
     private int screenH;
     private boolean leaving;
     private float corner = Float.MAX_VALUE;
+    /** 1 while the remote has it chosen (Left into the notices): it comes forward, lit. */
+    private final Spring lit = new Spring(0f, 0.002f, v -> {
+        setScaleX(1f + 0.035f * v);
+        setScaleY(1f + 0.035f * v);
+        invalidate();
+    });
+    private final Paint litRim = new Paint(Paint.ANTI_ALIAS_FLAG);
+    /** Chosen, its words show in full (lines no longer cut short) and it grows to hold them. */
+    private boolean opensText;
+    private final List<TextView> cut = new ArrayList<>();
+    private final Spring opening = new Spring(0f, 0.5f, this::setExtra);
+    /** Room to grow downwards once settled, and how much it has (a message opening up). */
+    private int growRoom;
+    private float extra;
+    private int growRoomW;
+    private float extraW;
+    /** How far it opens by itself once settled (a notice's second part), and for its words. */
+    private float baseGoal;
+    private float textGoal;
+    private Runnable onResize;
     private Runnable whenGone;
 
     /** `content` is laid out `w` x `h` inside the capsule. */
@@ -83,6 +109,8 @@ final class LiquidDrop extends FrameLayout implements android.view.Choreographer
         rim.setStyle(Paint.Style.STROKE);
         refract.setStyle(Paint.Style.STROKE);
         spec.setStyle(Paint.Style.STROKE);
+        litRim.setStyle(Paint.Style.STROKE);
+        litRim.setColor(0xFFFFFFFF);
         height = new Spring(0f, 0.3f, v -> invalidate());
         width = new Spring(0f, 0.2f, v -> {
             content.setAlpha(Math.max(0f, Math.min(1f, (v / fullW - 0.62f) / 0.3f)));
@@ -120,7 +148,7 @@ final class LiquidDrop extends FrameLayout implements android.view.Choreographer
         }
         float dt = lastFrame == 0 ? 0.016f : Math.min(0.05f, (now - lastFrame) / 1e9f);
         lastFrame = now;
-        backdrop.step(dt, fullW, fullH);
+        backdrop.step(dt, fullW + extraW, fullH + extra);
         invalidate();
         android.view.Choreographer.getInstance().postFrameCallback(this);
     }
@@ -162,6 +190,14 @@ final class LiquidDrop extends FrameLayout implements android.view.Choreographer
         }
         leaving = true;
         whenGone = gone;
+        opening.stop();
+        if (extra > 0.5f) {
+            // What opened folds back first, with the rest.
+            new Spring(extra, 0.5f, this::setExtra).to(0f, 0.3f, 1f);
+        }
+        if (extraW > 0.5f) {
+            new Spring(extraW, 0.5f, this::setExtraWidth).to(0f, 0.3f, 1f);
+        }
         width.to(fullH * 0.44f, 0.34f, 0.85f);
         height.to(fullH * 1.06f, 0.34f, 0.85f);
         postDelayed(() -> {
@@ -181,12 +217,12 @@ final class LiquidDrop extends FrameLayout implements android.view.Choreographer
     /** The drop: a capsule (or a bead, or a film) joined to the left edge by two fillets. */
     private void buildShape() {
         shape.reset();
-        float h = Math.max(0f, height.value());
-        float w = Math.max(0.5f, width.value());
+        float h = Math.max(0f, height.value()) + extra;
+        float w = Math.max(0.5f, width.value() + extraW);
         if (h < 1f) {
             return;
         }
-        float cy = getHeight() / 2f;
+        float cy = getHeight() / 2f + extra / 2f;   // grown, the top stays where it was
         float top = cy - h / 2f;
         float bottom = cy + h / 2f;
         // The tip: a half ellipse while the drop is short (a bead), a round end once it is long.
@@ -212,8 +248,8 @@ final class LiquidDrop extends FrameLayout implements android.view.Choreographer
             return;
         }
         float k = Math.max(0f, Math.min(1f, film.value()));
-        float h = height.value();
-        float top = getHeight() / 2f - h / 2f;
+        float h = height.value() + extra;
+        float top = getHeight() / 2f - height.value() / 2f;
         if (k < 0.9f) {
             shadow.setShadowLayer(14 * dp * (1 - k), 0, 4 * dp * (1 - k), 0x66000000);
             canvas.drawPath(shape, shadow);
@@ -263,6 +299,12 @@ final class LiquidDrop extends FrameLayout implements android.view.Choreographer
             }
         }
         canvas.drawPath(shape, tint);
+        float chosen = Math.max(0f, Math.min(1f, lit.value()));
+        if (chosen > 0.01f) {
+            tint.setAlpha(Math.round(0x22 * chosen));
+            canvas.drawPath(shape, tint);
+            tint.setAlpha(0x1A);
+        }
         // Light from above: a sheen over the upper half.
         sheen.setShader(new LinearGradient(0, top, 0, top + h * 0.6f, 0x29FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
         canvas.drawPath(shape, sheen);
@@ -274,6 +316,11 @@ final class LiquidDrop extends FrameLayout implements android.view.Choreographer
                         (Math.round(0x1F + 0x80 * k) << 24) | 0xFFFFFF, (Math.round(0x4D + 0x80 * k) << 24) | 0xFFFFFF},
                 new float[]{0f, 0.35f, 0.7f, 1f}, Shader.TileMode.CLAMP));
         canvas.drawPath(shape, rim);
+        if (chosen > 0.01f) {
+            litRim.setStrokeWidth(2 * dp);
+            litRim.setAlpha(Math.round(220 * chosen));
+            canvas.drawPath(shape, litRim);
+        }
         // Light catching the glass: bright at the top-left, a fainter glint at the bottom-right.
         if (k < 0.95f) {
             spec.setStrokeWidth(Math.max(1f, 1.5f * dp));
@@ -297,14 +344,133 @@ final class LiquidDrop extends FrameLayout implements android.view.Choreographer
         canvas.restoreToCount(saved);
     }
 
+    /** Chosen with the remote, or not: it comes forward a little with a bright rim. */
+    void setChosen(boolean on) {
+        setPivotX(0);
+        setPivotY(getHeight() / 2f - fullH / 2f);   // it comes forward from its top-left
+        lit.to(on ? 1f : 0f, 0.3f, 0.78f);
+        if (opensText && !leaving) {
+            if (on) {
+                openText();
+            } else if (textGoal > 0) {
+                textGoal = 0;
+                opening.onRest(() -> {
+                    if (textGoal == 0) {
+                        for (TextView t : cut) {
+                            t.setSingleLine(true);
+                            t.setEllipsize(TextUtils.TruncateAt.END);
+                        }
+                    }
+                });
+                opening.to(baseGoal, 0.34f, 0.92f);
+            }
+        }
+    }
+
+    /** Lets the words open in full when it is chosen (notices; the Claude card opens its own way). */
+    void setOpensText(boolean on) {
+        opensText = on;
+    }
+
+    private void openText() {
+        cut.clear();
+        collect(content);
+        if (cut.isEmpty()) {
+            return;
+        }
+        int wide = MeasureSpec.makeMeasureSpec(fullW, MeasureSpec.EXACTLY);
+        int free = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
+        content.measure(wide, free);
+        int shut = content.getMeasuredHeight();
+        for (TextView t : cut) {
+            t.setSingleLine(false);
+            t.setMaxLines(5);
+        }
+        content.measure(wide, free);
+        textGoal = Math.max(0, content.getMeasuredHeight() - shut);
+        opening.onRest(null);
+        opening.to(Math.min(growRoom, baseGoal + textGoal), 0.42f, 0.8f);
+    }
+
+    /** Once it has flowed out, it opens by `px` more after `delay` ms (the rest of a notice). */
+    void openBy(final float px, long delay) {
+        postDelayed(() -> {
+            if (leaving) {
+                return;
+            }
+            baseGoal = px;
+            if (onResize != null) {
+                onResize.run();
+            }
+            opening.to(Math.min(growRoom, baseGoal + textGoal), 0.56f, 0.8f);
+        }, delay);
+    }
+
+    /** Told when it is going to take more (or less) room, so the others can move. */
+    void setOnResize(Runnable r) {
+        onResize = r;
+    }
+
+    /** The lines that are cut short now (one line, ending in "..."). */
+    private void collect(View v) {
+        if (v instanceof TextView) {
+            TextView t = (TextView) v;
+            android.text.Layout l = t.getLayout();
+            if (t.getMaxLines() == 1 && l != null && l.getLineCount() > 0 && l.getEllipsisCount(0) > 0) {
+                cut.add(t);
+            }
+        } else if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                collect(g.getChildAt(i));
+            }
+        }
+    }
+
     /** A tall drop (a panel rather than a capsule): its corners no rounder than `r`. */
     void setCorner(float r) {
         corner = r;
     }
 
-    /** The capsule's height once settled. */
+    /**
+     * Lets it grow downwards later by up to `room` (setExtra); called before it is added, since
+     * its view is made taller for it.
+     */
+    void allowGrowth(int room) {
+        allowGrowth(0, room);
+    }
+
+    /** The same, wider by up to `roomW` as well (a Claude card opening from small). */
+    void allowGrowth(int roomW, int room) {
+        growRoomW = Math.max(0, roomW);
+        growRoom = Math.max(0, room);
+        LayoutParams l = (LayoutParams) content.getLayoutParams();
+        l.gravity = Gravity.TOP | Gravity.START;
+        l.topMargin = (viewHeight() - fullH) / 2;
+        content.setLayoutParams(l);
+    }
+
+    /** How far below its settled height it reaches now (0 .. the room it was given). */
+    void setExtra(float px) {
+        extra = Math.max(0f, Math.min(growRoom, px));
+        LayoutParams l = (LayoutParams) content.getLayoutParams();
+        l.height = fullH + Math.round(extra);
+        content.setLayoutParams(l);
+        invalidate();
+    }
+
+    /** As much wider as it reaches now (0 .. the room it was given). */
+    void setExtraWidth(float px) {
+        extraW = Math.max(0f, Math.min(growRoomW, px));
+        LayoutParams l = (LayoutParams) content.getLayoutParams();
+        l.width = fullW + Math.round(extraW);
+        content.setLayoutParams(l);
+        invalidate();
+    }
+
+    /** The capsule's height once settled (and grown, or as it will be). */
     int capsuleHeight() {
-        return fullH;
+        return fullH + Math.round(Math.max(extra, Math.min(growRoom, baseGoal + textGoal)));
     }
 
     boolean isLeaving() {
@@ -313,10 +479,10 @@ final class LiquidDrop extends FrameLayout implements android.view.Choreographer
 
     /** Tall enough for the film, wide enough for the capsule and its shadow. */
     int viewHeight() {
-        return Math.round(fullH * 2.5f + 20 * dp);
+        return Math.round(fullH * 2.5f + 20 * dp) + 2 * growRoom;
     }
 
     int viewWidth() {
-        return fullW + Math.round(24 * dp);
+        return fullW + growRoomW + Math.round(24 * dp);
     }
 }

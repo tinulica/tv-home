@@ -170,6 +170,53 @@ public class MainActivity extends Activity {
     private long wallpaperShownAt;
     private boolean resumed;
     private ClaudeUsage claudeUsage;
+
+    private long noticesGoneAt;
+
+    /** Left at the left edge (or with nothing chosen) while notices show: the remote goes into them. */
+    private boolean intoNotices() {
+        SourcesService s = SourcesService.instance;
+        if (s == null || !SourcesService.noticesUp() || control.getVisibility() == View.VISIBLE
+                || profileModal != null) {
+            return false;
+        }
+        View f = getCurrentFocus();
+        boolean edge = f == null || f == idle || f.focusSearch(View.FOCUS_LEFT) == null;
+        return edge && s.enterNotices();
+    }
+
+    /**
+     * Eases the usage pill towards being seen (home screen) or not (anything over it); while a
+     * notice shows it also rises off the top of the screen, out of the notice's way.
+     */
+    private void syncUsage() {
+        if (claudeUsage == null || claudeUsage.getVisibility() != View.VISIBLE) {
+            return;
+        }
+        boolean notices = SourcesService.noticesUp()
+                || android.os.SystemClock.uptimeMillis() - noticesGoneAt < 500;
+        boolean away = notices || open || browsing || control.getVisibility() == View.VISIBLE;
+        float target = away ? 0f : pills.getAlpha();
+        float lift = notices ? -px(90) : 0f;
+        float now = claudeUsage.getAlpha();
+        float y = claudeUsage.getTranslationY();
+        boolean moving = false;
+        if (Math.abs(target - now) > 0.004f) {
+            claudeUsage.setAlpha(now + (target - now) * 0.2f);
+            moving = true;
+        } else if (now != target) {
+            claudeUsage.setAlpha(target);
+        }
+        if (Math.abs(lift - y) > 0.5f) {
+            claudeUsage.setTranslationY(y + (lift - y) * 0.16f);
+            moving = true;
+        } else if (y != lift) {
+            claudeUsage.setTranslationY(lift);
+        }
+        if (moving) {
+            claudeUsage.postInvalidateOnAnimation();
+        }
+    }
     private final Runnable usageTick = new Runnable() {
         @Override
         public void run() {
@@ -812,6 +859,21 @@ public class MainActivity extends Activity {
         claudeUsage.setBackground(new GlassDrawable(px(18), dp, 0x24FFFFFF));
         glass(claudeUsage, px(18), 0.8f);
         root.addView(claudeUsage, at(-2, px(36), Gravity.TOP | Gravity.START, side, px(26), 0, 0));
+        // Only on the home screen itself: it goes with the clock (app list, search, Cinema) and
+        // also while Control Center or the row of posters is open.
+        claudeUsage.setAlpha(0f);
+        root.getViewTreeObserver().addOnPreDrawListener(() -> {
+            syncUsage();
+            return true;
+        });
+        // While notices show at the left it goes up off the screen, and comes back after them.
+        SourcesService.watchNotices(up -> {
+            if (!up) {
+                noticesGoneAt = android.os.SystemClock.uptimeMillis();
+                handler.postDelayed(() -> claudeUsage.postInvalidateOnAnimation(), 520);
+            }
+            claudeUsage.postInvalidateOnAnimation();
+        });
 
         // "Up for full screen", shown above the tray while a pill is focused (tvOS 26 hint).
         hint = text(12, Typeface.create("sans-serif-medium", Typeface.NORMAL));
@@ -3713,6 +3775,8 @@ public class MainActivity extends Activity {
         }
         loadAvatar();
         rebuildTiles();
+        usageTick.run();
+        SourcesService.profileChanged(this);
         SourcesService service = SourcesService.instance;
         if (service != null) {
             service.showNotice("TV Home", new android.graphics.drawable.BitmapDrawable(getResources(),
@@ -3802,7 +3866,7 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- customisable shortcuts
 
     private static final String KEY_SHORTCUTS = "cc_shortcuts";
-    private static final String DEFAULT_SHORTCUTS = "search,sources,antenna,apps,wallpaper,picture,sound,access,settings";
+    private static final String DEFAULT_SHORTCUTS = "search,claude,sources,antenna,apps,wallpaper,picture,sound,access,settings";
     private static final int SHORTCUT_COLUMNS = 4;
     private View ccEditing;
     private final java.util.WeakHashMap<View, String> shortcutIdOf = new java.util.WeakHashMap<>();
@@ -3811,6 +3875,7 @@ public class MainActivity extends Activity {
     /** Every shortcut the Control Center can hold: id, symbol, name. */
     private static final String[][] SHORTCUTS = {
             {"search", "search", "Caută"},
+            {"claude", "claude", "Claude"},
             {"sources", "hdmi", "Surse"},
             {"antenna", "antenna", "Antenă"},
             {"apps", "list", "Aplicații"},
@@ -3835,6 +3900,16 @@ public class MainActivity extends Activity {
                 prefs.edit().putString(key, "search," + saved).apply();
             }
             prefs.edit().putBoolean(added, true).apply();
+        }
+        // So did Claude (which account this profile sees): after search, once.
+        String claudeAdded = Profiles.scoped(prefs, "cc_claude_added");
+        if (!prefs.getBoolean(claudeAdded, false)) {
+            String saved = prefs.getString(key, null);
+            if (saved != null && !("," + saved + ",").contains(",claude,")) {
+                prefs.edit().putString(key, saved.startsWith("search,") ? "search,claude," + saved.substring(7)
+                        : "claude," + saved).apply();
+            }
+            prefs.edit().putBoolean(claudeAdded, true).apply();
         }
         List<String> out = new ArrayList<>();
         for (String id : prefs.getString(Profiles.scoped(prefs, KEY_SHORTCUTS), DEFAULT_SHORTCUTS).split(",")) {
@@ -3865,6 +3940,8 @@ public class MainActivity extends Activity {
                     hideControl();
                     openSearch();
                 };
+            case "claude":
+                return () -> expand(3);
             case "sources":
                 return () -> tabButtons.get(TAB_SOURCES).requestFocus();
             case "antenna":
@@ -3942,6 +4019,9 @@ public class MainActivity extends Activity {
             final String[] def = shortcutDef(id);
             View b = shortcutButton(def[1], shortcutAction(id), false);
             shortcutIdOf.put(b, id);
+            if ("claude".equals(id)) {
+                ccClaude = b;
+            }
             b.setContentDescription(def[2]);
             b.setOnLongClickListener(v -> {
                 startCcEdit(v);
@@ -3990,6 +4070,11 @@ public class MainActivity extends Activity {
             plus.setText("+");
             plus.setGravity(Gravity.CENTER);
             tile.addView(plus, full());
+        } else if ("claude".equals(glyph)) {
+            // Claude's mark in Claude's colour, which stays when the circle turns white.
+            icon.setImageBitmap(ClaudeCard.markBitmap(ccPx(20), ClaudeCard.CORAL));
+            icon.setTag("picture");
+            tile.addView(icon, at(px(20), px(20), Gravity.CENTER, 0, 0, 0, 0));
         } else {
             icon.setImageBitmap(Glyphs.symbol(this, glyph, ccPx(18)));
             tile.addView(icon, at(px(18), px(18), Gravity.CENTER, 0, 0, 0, 0));
@@ -5427,6 +5512,9 @@ public class MainActivity extends Activity {
     private View ccBluetooth;
     private View ccDnd;
     private View ccSleep;
+    private View ccClaude;
+    private int expandTileW;
+    private int expandTileH;
     private View ccBig;
     private Runnable stopBtDiscovery;
     private final List<Connectivity.Device> btFound = new ArrayList<>();
@@ -5445,9 +5533,22 @@ public class MainActivity extends Activity {
         panel.setClipChildren(false);
         panel.setClipToPadding(false);
         TextView heading = text(14, Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        heading.setText(wifi ? "Wi-Fi" : kind == 1 ? "Bluetooth" : t("Oprire automată", "Sleep timer"));
+        heading.setText(wifi ? "Wi-Fi" : kind == 1 ? "Bluetooth" : kind == 3 ? "Claude"
+                : t("Oprire automată", "Sleep timer"));
         heading.setPadding(px(6), 0, 0, px(6));
         panel.addView(heading);
+        final TextView note = text(10.5f, Typeface.DEFAULT);
+        if (kind == 3) {
+            // Each profile sees one account's messages, questions, tasks and usage, or none.
+            note.setSingleLine(false);
+            note.setMaxLines(3);
+            note.setAlpha(0.72f);
+            note.setText(t("Contul Claude al profilului " + profileName()
+                            + ": mesajele, întrebările, sarcinile și consumul lui apar doar aici.",
+                    "Claude account for " + profileName() + ": its messages, questions, tasks and usage show only here."));
+            note.setPadding(px(6), 0, px(6), px(8));
+            panel.addView(note);
+        }
         final LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setClipChildren(false);
@@ -5462,6 +5563,8 @@ public class MainActivity extends Activity {
             }, 3500);
         } else if (kind == 2) {
             fillSleepRows(rows);
+        } else if (kind == 3) {
+            fillClaudeRows(rows);
         } else {
             fillBtRows(rows);
             stopBtDiscovery = Connectivity.discover(this, d -> handler.post(() -> {
@@ -5482,7 +5585,7 @@ public class MainActivity extends Activity {
         // the other tiles fade away under it; the glass keeps its shape (nothing is squashed)
         // and the rows fade in once there is room for them. It grows over the tiles (in the
         // overlay) and takes its place in the panel once it has settled.
-        View from = kind == 0 ? ccWifi : kind == 1 ? ccBluetooth : ccSleep;
+        View from = kind == 0 ? ccWifi : kind == 1 ? ccBluetooth : kind == 3 ? ccClaude : ccSleep;
         final int fullW = px(TILE_W) * 2 + px(6);
         final int right = tabContent.getWidth() - tabContent.getPaddingRight();
         final int top = tabContent.getPaddingTop();
@@ -5500,8 +5603,12 @@ public class MainActivity extends Activity {
         expandTileTop = fromTop;
         final int sl = fromLeft;
         final int st = fromTop;
-        final int tileW = px(TILE_W);
-        final int tileH = px(58);
+        // It grows out of the tile pressed, whatever its size (the Claude circle is small).
+        boolean placed = from != null && from.isAttachedToWindow() && from.getWidth() > 0;
+        final int tileW = placed ? from.getWidth() : px(TILE_W);
+        final int tileH = placed ? from.getHeight() : px(58);
+        expandTileW = tileW;
+        expandTileH = tileH;
         expanded = panel;
         expandedKind = kind;
         growing = true;
@@ -5527,6 +5634,7 @@ public class MainActivity extends Activity {
             panel.layout(l, tp, l + w, tp + h);
             float c = Math.max(0f, Math.min(1f, (t - 0.4f) / 0.6f));
             heading.setAlpha(c);
+            note.setAlpha(0.72f * c);
             rows.setAlpha(c);
         });
         expandSpring.onRest(() -> {
@@ -5591,7 +5699,7 @@ public class MainActivity extends Activity {
             child.setVisibility(View.VISIBLE);
             child.animate().alpha(1f).setStartDelay(60).setDuration(220).start();
         }
-        View back = wasKind == 0 ? ccWifi : wasKind == 1 ? ccBluetooth : ccSleep;
+        View back = wasKind == 0 ? ccWifi : wasKind == 1 ? ccBluetooth : wasKind == 3 ? ccClaude : ccSleep;
         if (back == null || !back.isAttachedToWindow()) {
             back = tabContent.findViewWithTag("first");
         }
@@ -5607,8 +5715,8 @@ public class MainActivity extends Activity {
         final int fromH = panel.getHeight();
         final int toL = expandTileLeft;
         final int toT = expandTileTop;
-        final int toW = px(TILE_W);
-        final int toH = px(58);
+        final int toW = expandTileW > 0 ? expandTileW : px(TILE_W);
+        final int toH = expandTileH > 0 ? expandTileH : px(58);
         refreshCcTiles();
         expandSpring = new Spring(1f, 0.004f, t -> {
             int l = Math.round(toL + (fromL - toL) * t);
@@ -5733,6 +5841,49 @@ public class MainActivity extends Activity {
             setTileDetail(ccSleep, sleepDetail(at));
             switchLook(ccSleep, sleepIcon, at != 0, ccSleep.isFocused());
         }
+    }
+
+    /** Claude: the accounts this profile can be linked to (a check by the one it is), or none. */
+    private void fillClaudeRows(final LinearLayout rows) {
+        View focused = getCurrentFocus();
+        int at = focused != null && focused.getParent() == rows ? rows.indexOfChild(focused) : 0;
+        rows.removeAllViews();
+        String linked = ClaudeLink.linked(this);
+        List<ClaudeLink.Account> accounts = ClaudeLink.accounts(this);
+        for (final ClaudeLink.Account a : accounts) {
+            String name = a.detail.isEmpty() ? a.name : a.name + "  \u00b7  " + a.detail;
+            rows.addView(listRow(name, "", a.id.equals(linked) ? new String[]{"check"} : null,
+                    () -> claudeLink(rows, a.id)), listParams());
+        }
+        rows.addView(listRow(t("Niciun cont", "No account"), "", linked.isEmpty() ? new String[]{"check"} : null,
+                () -> claudeLink(rows, "")), listParams());
+        if (accounts.isEmpty()) {
+            rows.addView(listRow(t("Pe calculator: tvtool claude --name …", "On the computer: tvtool claude --name …"),
+                    "", () -> { }), listParams());
+        }
+        View again = rows.getChildAt(Math.min(at, rows.getChildCount() - 1));
+        if (focused != null && focused.getParent() == null && again != null) {
+            again.requestFocus();
+        }
+    }
+
+    private void claudeLink(LinearLayout rows, String id) {
+        ClaudeLink.link(this, id);
+        fillClaudeRows(rows);
+        if (claudeUsage != null) {
+            claudeUsage.refresh();
+        }
+        SourcesService.profileChanged(this);
+    }
+
+    private String profileName() {
+        String id = Profiles.current(prefs);
+        for (Profiles.Profile p : Profiles.all(prefs, accountName())) {
+            if (p.id.equals(id)) {
+                return p.name;
+            }
+        }
+        return "";
     }
 
     private void fillWifiRows(LinearLayout rows) {
@@ -5939,6 +6090,10 @@ public class MainActivity extends Activity {
             return true;
         }
         Press.key(event, getCurrentFocus());
+        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && event.getAction() == KeyEvent.ACTION_DOWN
+                && event.getRepeatCount() == 0 && intoNotices()) {
+            return true;
+        }
         if (idle != null && getCurrentFocus() == idle && event.getAction() == KeyEvent.ACTION_DOWN
                 && control.getVisibility() != View.VISIBLE && profileModal == null) {
             switch (keyCode) {
