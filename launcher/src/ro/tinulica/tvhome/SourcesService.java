@@ -460,8 +460,27 @@ public final class SourcesService extends AccessibilityService {
         final boolean asking = !options.isEmpty();
         claudeId = id;
         final FrameLayout layer = new FrameLayout(this) {
+            private long downAt;
+            private int lastCode;
+
             @Override
             public boolean dispatchKeyEvent(KeyEvent event) {
+                int code = event.getKeyCode();
+                boolean dpad = code >= KeyEvent.KEYCODE_DPAD_UP && code <= KeyEvent.KEYCODE_DPAD_RIGHT;
+                if (dpad && event.getAction() == KeyEvent.ACTION_DOWN) {
+                    long t = event.getEventTime();
+                    if (event.getRepeatCount() > 0) {
+                        // This remote's "released" comes late and Android repeats a short press:
+                        // a repeat only counts once the key is really held.
+                        if (t - event.getDownTime() < 750) {
+                            return true;
+                        }
+                    } else if (code == lastCode && t - downAt < 140) {
+                        return true;   // the same press arriving twice
+                    }
+                    downAt = t;
+                    lastCode = code;
+                }
                 if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
                     if (event.getAction() == KeyEvent.ACTION_UP) {
                         claudeAnswered(claudeId, -1, "");
@@ -526,6 +545,13 @@ public final class SourcesService extends AccessibilityService {
             }
             final FrameLayout layer = claudeLayer;
             final ClaudeCard card = claudeCard;
+            if (layer != null) {
+                try {
+                    windows.updateViewLayout(layer, overlayParams(false));
+                } catch (RuntimeException ignored) {
+                    // Gone already.
+                }
+            }
             claudeId = null;
             claudeLayer = null;
             claudeCard = null;
@@ -1858,6 +1884,12 @@ public final class SourcesService extends AccessibilityService {
      * accessibility service cannot let a key through after holding it, so it sends one).
      */
     private boolean backKey(KeyEvent event) {
+        if (claudeLayer != null && claudeCard != null && claudeCard.waiting()) {
+            if (event.getAction() == KeyEvent.ACTION_UP) {
+                claudeAnswered(claudeId, -1, "");
+            }
+            return true;
+        }
         if (backHeld) {
             // The rest of the press that opened the switcher (repeats, then the release) must
             // not reach it, or letting go of Back would close it again at once.

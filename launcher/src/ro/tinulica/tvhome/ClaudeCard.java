@@ -153,6 +153,17 @@ final class ClaudeCard extends FrameLayout implements Choreographer.FrameCallbac
                 clp.topMargin = i == 0 ? 0 : px(7);
                 chips.addView(chip, clp);
             }
+            for (int i = 0; i < chips.getChildCount(); i++) {
+                View c = chips.getChildAt(i);
+                c.setId(View.generateViewId());
+            }
+            for (int i = 0; i < chips.getChildCount(); i++) {
+                View c = chips.getChildAt(i);
+                c.setNextFocusUpId(chips.getChildAt(Math.max(0, i - 1)).getId());
+                c.setNextFocusDownId(chips.getChildAt(Math.min(chips.getChildCount() - 1, i + 1)).getId());
+                c.setNextFocusLeftId(c.getId());
+                c.setNextFocusRightId(c.getId());
+            }
             choices.addView(chips, new LinearLayout.LayoutParams(0, -2, 1f));
             if (qr != null) {
                 LinearLayout phone = new LinearLayout(context);
@@ -551,13 +562,23 @@ final class ClaudeCard extends FrameLayout implements Choreographer.FrameCallbac
             b.setShadowLayer(has ? 0 : px(3), 0, has ? 0 : px(1), 0x66000000);
             v.animate().scaleX(has ? 1.03f : 1f).scaleY(has ? 1.03f : 1f).setDuration(160).start();
         });
+        final boolean[] pressed = {false};
         b.setOnKeyListener((v, code, event) -> {
             boolean ok = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
                     || code == KeyEvent.KEYCODE_NUMPAD_ENTER;
-            if (ok && event.getAction() == KeyEvent.ACTION_UP && event.getRepeatCount() == 0) {
-                v.performClick();
+            if (!ok) {
+                return false;
             }
-            return ok;
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0
+                    && SystemClock.uptimeMillis() - born > 700) {
+                pressed[0] = true;   // pressed here, after the card came in (not a press left over)
+            } else if (event.getAction() == KeyEvent.ACTION_UP && pressed[0]) {
+                pressed[0] = false;
+                if (waiting) {
+                    v.performClick();
+                }
+            }
+            return true;
         });
         return b;
     }
