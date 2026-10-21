@@ -405,11 +405,11 @@ Cât așteaptă o întrebare de pe calculator, televizorul răspunde pe portul 8
   nou imediat după.
 - **Căutarea sau Mod Cinema cer o cheie**: `python tvtool.py tmdb`.
 - **Ceva nu arată bine după o actualizare**: `python tvtool.py restore`, apoi din nou `launcher`.
-
 - **Un mesaj de pe calculator nu apare**: profilul în uz nu e legat de contul acelui calculator
   (Control Center, cercul Claude); apare când e în uz un profil legat. Cât serviciul e oprit (vezi
   primul punct) vine ca un mesaj simplu de sistem.
 - **Telefonul nu deschide pagina întrebării**: telefonul trebuie să fie în aceeași rețea cu televizorul.
+
 ---
 
 ## Compilare
