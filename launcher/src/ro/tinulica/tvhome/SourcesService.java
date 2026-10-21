@@ -386,6 +386,180 @@ public final class SourcesService extends AccessibilityService {
         return true;
     }
 
+    // ------------------------------------------------------------------ messages from Claude
+
+    private FrameLayout claudeLayer;
+    private ClaudeCard claudeCard;
+    private String claudeId;
+    private final QuestionServer questions = new QuestionServer(this::claudeAnswered);
+    private final Runnable claudeTimeout = () -> claudeAnswered(claudeId, -1, "");
+
+    private static String extra(Intent intent, String key, boolean b64) {
+        String v = intent.getStringExtra(key);
+        if (v == null || !b64) {
+            return v;
+        }
+        try {
+            return new String(android.util.Base64.decode(v, android.util.Base64.DEFAULT),
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            return v;
+        }
+    }
+
+    /**
+     * A message from Claude (MessageReceiver): a ClaudeCard at the top left. With "options" it is
+     * a question: the remote or the phone (QuestionServer) answers it, and the answer is written to
+     * files/claude/answer-ID.txt for the computer to read. "dismiss" with an ID takes a card away.
+     * False when our overlay cannot show.
+     */
+    boolean claude(final Intent intent) {
+        if (windows == null || !connected()) {
+            return false;
+        }
+        handler.post(() -> {
+            boolean b64 = intent.getBooleanExtra("b64", false);
+            String dismiss = intent.getStringExtra("dismiss");
+            if (dismiss != null) {
+                if (dismiss.equals(claudeId)) {
+                    closeClaude();
+                }
+                return;
+            }
+            final String id = intent.getStringExtra("id") != null ? intent.getStringExtra("id")
+                    : Long.toHexString(System.nanoTime());
+            final String title = extra(intent, "title", b64);
+            final String text = extra(intent, "text", b64);
+            final String details = extra(intent, "details", b64);
+            final String from = extra(intent, "from", b64);
+            String opts = extra(intent, "options", b64);
+            final List<String> options = new ArrayList<>();
+            if (opts != null) {
+                for (String o : opts.split("\\|")) {
+                    if (!o.trim().isEmpty()) {
+                        options.add(o.trim());
+                    }
+                }
+            }
+            android.graphics.Bitmap qr = null;
+            String qrName = intent.getStringExtra("qr");
+            java.io.File dir = getExternalFilesDir("claude");
+            if (qrName != null && dir != null) {
+                qr = android.graphics.BitmapFactory.decodeFile(new java.io.File(dir, qrName).getPath());
+            }
+            final android.graphics.Bitmap code = qr;
+            final int timeout = intent.getIntExtra("timeout", options.isEmpty() ? 0 : 600);
+            captureBehind(() -> showClaude(id, from, title, text, details, options, code, timeout));
+        });
+        return true;
+    }
+
+    private void showClaude(final String id, String from, String title, String text, String details,
+                            List<String> options, android.graphics.Bitmap qr, int timeout) {
+        closeClaude();
+        final boolean asking = !options.isEmpty();
+        claudeId = id;
+        final FrameLayout layer = new FrameLayout(this) {
+            @Override
+            public boolean dispatchKeyEvent(KeyEvent event) {
+                if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+                    if (event.getAction() == KeyEvent.ACTION_UP) {
+                        claudeAnswered(claudeId, -1, "");
+                    }
+                    return true;
+                }
+                return super.dispatchKeyEvent(event);
+            }
+        };
+        layer.setClipChildren(false);
+        final ClaudeCard card = new ClaudeCard(this, dp, from, title, text, details, options, qr, null,
+                (index, label) -> claudeAnswered(id, index, label));
+        android.util.DisplayMetrics m = getResources().getDisplayMetrics();
+        card.setBehind(behind, m.widthPixels, m.heightPixels);
+        int width = px(asking ? 520 : 470);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(width, -2, Gravity.TOP | Gravity.START);
+        lp.leftMargin = px(40);
+        lp.topMargin = px(62);
+        layer.addView(card, lp);
+        try {
+            windows.addView(layer, overlayParams(asking));
+        } catch (RuntimeException e) {
+            overlayFailed();
+            return;
+        }
+        claudeLayer = layer;
+        claudeCard = card;
+        card.appear(width);
+        chime("notice.ogg");
+        if (asking) {
+            QuestionServer.Question q = new QuestionServer.Question();
+            q.id = id;
+            q.from = from;
+            q.title = title;
+            q.text = text;
+            q.details = details;
+            q.options = options;
+            questions.ask(q);
+        }
+        handler.removeCallbacks(claudeTimeout);
+        long stay = asking ? timeout * 1000L
+                : 9000L + Math.min(24000L, 45L * ((details == null ? 0 : details.length()) + (text == null ? 0 : text.length())));
+        if (stay > 0) {
+            handler.postDelayed(claudeTimeout, stay);
+        }
+    }
+
+    /** An answer (index -1: closed without one): written down for the computer, the card leaves. */
+    private void claudeAnswered(final String id, final int index, final String label) {
+        handler.post(() -> {
+            if (id == null || !id.equals(claudeId)) {
+                return;
+            }
+            handler.removeCallbacks(claudeTimeout);
+            questions.close(id);
+            java.io.File dir = getExternalFilesDir("claude");
+            if (dir != null && claudeCard != null && claudeCard.waiting()) {
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(new java.io.File(dir, "answer-" + id + ".txt"))) {
+                    out.write(((index < 0 ? "" : label) + "\n" + index + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                } catch (java.io.IOException ignored) {
+                    // The computer will time out.
+                }
+            }
+            final FrameLayout layer = claudeLayer;
+            final ClaudeCard card = claudeCard;
+            claudeId = null;
+            claudeLayer = null;
+            claudeCard = null;
+            if (card == null) {
+                return;
+            }
+            Runnable gone = () -> {
+                if (layer != null) {
+                    removeQuietly(layer);
+                }
+            };
+            if (index >= 0 && card.waiting()) {
+                sounds.play("select");
+                card.answered(label, gone);
+            } else {
+                card.disappear(gone);
+            }
+        });
+    }
+
+    private void closeClaude() {
+        handler.removeCallbacks(claudeTimeout);
+        if (claudeId != null) {
+            questions.close(claudeId);
+        }
+        if (claudeLayer != null) {
+            removeQuietly(claudeLayer);
+        }
+        claudeLayer = null;
+        claudeCard = null;
+        claudeId = null;
+    }
+
     /** A short message (what just happened, as a toast would say it) as a drop at the left edge. */
     static void say(Context context, String title) {
         say(context, title, null);

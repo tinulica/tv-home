@@ -938,6 +938,81 @@ def cmd_dock(args):
     screenshot(device, "dock")
 
 
+# ---------------------------------------------------------------------------- messages on the TV
+
+MESSAGES = "/sdcard/Android/data/%s/files/claude" % HOME_PKG
+
+
+def _b64(text):
+    import base64
+    return base64.b64encode((text or "").encode("utf-8")).decode("ascii")
+
+
+def _message(device, extras):
+    """Sends MessageReceiver a message; every text extra base64-encoded so anything survives the shell."""
+    parts = ["am broadcast -n %s/.MessageReceiver --ez b64 true" % HOME_PKG]
+    for key, value in extras.items():
+        if value is None:
+            continue
+        if isinstance(value, int):
+            parts.append("--ei %s %d" % (key, value))
+        elif key in ("id", "qr", "style", "dismiss"):
+            parts.append("--es %s %s" % (key, value))
+        else:
+            parts.append("--es %s %s" % (key, _b64(value)))
+    return device.shell(" ".join(parts))
+
+
+def cmd_say(args):
+    """A message on the TV: a card (with --details it opens up to show them)."""
+    device = open_device(args.ip, args.backend)
+    _message(device, {"style": "claude" if args.details or args.card else None, "from": args.sender,
+                      "title": args.title, "text": args.text, "details": args.details})
+    say("Trimis.")
+
+
+def cmd_ask(args):
+    """A question on the TV, answered with the remote or from a phone (the QR code). Prints the answer."""
+    import secrets
+    import tempfile
+    device = open_device(args.ip, args.backend)
+    host = load_json(STATE_FILE, {}).get("host", "")
+    token = secrets.token_hex(6)
+    options = [o.strip() for o in args.options.split("|") if o.strip()] or ["Da", "Nu"]
+    qr_name = None
+    try:
+        import segno
+        url = "http://%s:8642/q/%s" % (host.split(":")[0], token)
+        qr_name = "qr-%s.png" % token
+        local = os.path.join(tempfile.gettempdir(), qr_name)
+        segno.make(url, error="m").save(local, scale=8, border=2)
+        device.shell("mkdir -p %s" % MESSAGES)
+        device.push(local, "%s/%s" % (MESSAGES, qr_name))
+        os.remove(local)
+    except ImportError:
+        say("(Fără cod QR: python -m pip install segno)")
+    _message(device, {"style": "claude", "id": token, "from": args.sender, "title": args.question,
+                      "text": args.text, "details": args.details, "options": "|".join(options), "qr": qr_name,
+                      "timeout": args.timeout})
+    answer_file = "%s/answer-%s.txt" % (MESSAGES, token)
+    deadline = time.time() + args.timeout
+    answer = None
+    while time.time() < deadline:
+        out = device.shell("cat %s 2>/dev/null" % answer_file).strip()
+        if out:
+            lines = out.splitlines()
+            answer = lines[0] if lines and lines[0] else ""
+            break
+        time.sleep(1.0)
+    device.shell("rm -f %s %s/%s" % (answer_file, MESSAGES, qr_name or "none"))
+    if answer is None:
+        _message(device, {"dismiss": token})
+        print("(fără răspuns)")
+        sys.exit(2)
+    print(answer if answer else "(închis fără răspuns)")
+    sys.exit(0 if answer else 1)
+
+
 def cmd_shot(args):
     device = open_device(args.ip, args.backend)
     screenshot(device, args.name)
@@ -1039,6 +1114,19 @@ def main(argv=None):
     p.add_argument("--off", action="store_true", help="retrage accesul la notificări")
     p = sub.add_parser("tmdb", help="cheia TMDB pentru Cinema (filme și unde le găsiți în România)")
     p.add_argument("--new", action="store_true", help="introduceți altă cheie")
+    p = sub.add_parser("say", help="un mesaj pe televizor (o notificare; --details îl face card care se extinde)")
+    p.add_argument("title")
+    p.add_argument("text", nargs="?")
+    p.add_argument("--details", help="mai multe rânduri; '- ' = listă, **text** = îngroșat")
+    p.add_argument("--from", dest="sender", default="Claude", help="de la cine (implicit: Claude)")
+    p.add_argument("--card", action="store_true", help="cardul mare chiar și fără detalii")
+    p = sub.add_parser("ask", help="o întrebare pe televizor; răspunsul (telecomanda sau telefonul) e afișat aici")
+    p.add_argument("question")
+    p.add_argument("text", nargs="?")
+    p.add_argument("--options", default="Da|Nu", help="variantele, separate prin | (implicit: Da|Nu)")
+    p.add_argument("--details")
+    p.add_argument("--from", dest="sender", default="Claude")
+    p.add_argument("--timeout", type=int, default=600, help="câte secunde așteaptă (implicit 600)")
     p = sub.add_parser("shot", help="captură de ecran")
     p.add_argument("name", nargs="?", default="ecran")
     p = sub.add_parser("restore", help="anulează toate schimbările")
@@ -1050,6 +1138,7 @@ def main(argv=None):
         "dock": cmd_dock, "shot": cmd_shot, "restore": cmd_restore,
         "update": cmd_update, "profile": cmd_profile, "folder": cmd_folder, "cameras": cmd_cameras,
         "icons": cmd_icons, "surse": cmd_surse, "notificari": cmd_notificari, "tmdb": cmd_tmdb,
+        "say": cmd_say, "ask": cmd_ask,
         "sounds": lambda a: cmd_sounds_reset(open_device(a.ip, a.backend)) if a.reset else cmd_sounds(a),
     }
     commands[args.command](args)
