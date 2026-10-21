@@ -138,8 +138,6 @@ adb shell am broadcast -n ro.tinulica.tvhome/.MessageReceiver --es title "Backup
 
 ![A message from Claude](docs/images/claude-message.jpg)
 
-![Out small, then it opens](docs/images/claude-opening.jpg)
-
 ### Search
 
 A Liquid Glass search field and keyboard over the frosted home screen. Type (or speak, where the TV
@@ -153,8 +151,6 @@ it on YouTube. Needs a free TMDB key ([step 8](#8-search-and-cinema-mode-optiona
 
 Several people, each with a name, a picture and their own dock order. Hold OK on a profile in Control
 Center to rename it or change its picture.
-
-![A profile](docs/images/profile.jpg)
 
 ### Shortcuts on the remote
 

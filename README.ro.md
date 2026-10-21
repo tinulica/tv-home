@@ -141,8 +141,6 @@ adb shell am broadcast -n ro.tinulica.tvhome/.MessageReceiver --es title "Backup
 
 ![Un mesaj de la Claude](docs/images/claude-message.jpg)
 
-![Iese mic, apoi se deschide](docs/images/claude-opening.jpg)
-
 ### Căutare
 
 Un câmp de căutare și o tastatură din sticlă peste ecranul principal estompat. Scrii (sau spui, unde
@@ -157,8 +155,6 @@ Max, Prime Video); *Trailer* îl pornește pe YouTube. Are nevoie de o cheie TMD
 
 Mai multe persoane, fiecare cu nume, imagine și ordinea ei de aplicații în bară. Ții apăsat OK pe un
 profil în Control Center ca să-i schimbi numele sau imaginea.
-
-![Un profil](docs/images/profile.jpg)
 
 ### Scurtături pe telecomandă
 
