@@ -14,8 +14,8 @@ helps you choose a film, weather and warning notices, messages and questions fro
 > manager), so on other brands parts of it will not work. It is a personal project, not affiliated
 > with Apple, TCL or Google.
 >
-> **Open source, and still rough in places.** There are bugs; they can be fixed. Issues and pull
-> requests are welcome.
+> **Open source, and still rough in places.** There are bugs; they can be fixed. Bug reports are
+> welcome as issues; the code itself is changed only by its author, so pull requests are closed.
 
 ---
 

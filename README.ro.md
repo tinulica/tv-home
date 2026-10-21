@@ -15,8 +15,8 @@ televizor), plus un instrument care curăță televizorul.
 > sursele, managerul de energie), așa că pe alte mărci unele părți nu vor merge. E un proiect personal,
 > fără legătură cu Apple, TCL sau Google.
 >
-> **Open source și încă neșlefuit pe alocuri.** Are buguri; se pot rezolva. Issue-urile și pull
-> request-urile sunt binevenite.
+> **Open source și încă neșlefuit pe alocuri.** Are buguri; se pot rezolva. Bugurile se pot semnala
+> ca issue-uri; codul îl modifică doar autorul, așa că pull request-urile sunt închise.
 
 ---
 
